@@ -15,9 +15,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 45785116260 --repo "${{ github.repository }}" --interval 12 --exit-status
+          gh run watch 45785842225 --repo "${{ github.repository }}" --interval 12 --exit-status
           if ($LASTEXITCODE -ne 0) { throw "The revised Windows build failed." }
-          gh run download 45785116260 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          gh run download 45785842225 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
           if ($LASTEXITCODE -ne 0) { throw 'Unable to download the tested runtime.' }
           icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
           if ($LASTEXITCODE -ne 0) { throw 'Unable to set runtime sandbox permissions.' }
