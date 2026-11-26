@@ -13,6 +13,9 @@ struct NavigationTiming {
     double tls = 0;
     double first_byte = 0;
     double document = 0;
+    double page_fps = 0;
+    double page_frame_ms = 0;
+    double low_fps = 0;
 };
 
 class ScriptRun final : public CefDevToolsMessageObserver {

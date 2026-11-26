@@ -3,6 +3,7 @@
 #include "../extensions/manager.h"
 #include "../settings/page.h"
 #include "../scripts/runner.h"
+#include "../performance/processes.h"
 #include "include/cef_browser.h"
 #include <windows.h>
 #include <cstdint>
@@ -130,6 +131,7 @@ private:
     uint64_t timing_tab_ = 0;
     CefRefPtr<ScriptRun> timing_run_;
     std::optional<NavigationTiming> timing_result_;
+    ProcessSnapshot performance_before_;
     UINT font_dpi_ = 0;
     uint64_t next_id_ = 1;
     uint64_t selected_ = 0;

@@ -81,7 +81,8 @@ void ScriptRun::OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id,
     auto timing = response ? response->GetDictionary("value") : nullptr;
     if (timing_ && timing && timing->GetBool("valid")) {
         Finish(NavigationTiming{ReadNumber(timing, "dns"), ReadNumber(timing, "connection"),
-            ReadNumber(timing, "tls"), ReadNumber(timing, "firstByte"), ReadNumber(timing, "document")});
+            ReadNumber(timing, "tls"), ReadNumber(timing, "firstByte"), ReadNumber(timing, "document"),
+            ReadNumber(timing, "fps"), ReadNumber(timing, "frameMs"), ReadNumber(timing, "lowFps")});
     } else {
         Finish();
     }
@@ -98,11 +99,38 @@ void ScriptRun::Evaluate(int context) {
     if (timing_) source += R"JS(
 const entry = performance.getEntriesByType('navigation')[0];
 if (!entry || !entry.responseStart) return;
-return {valid:true,dns:entry.domainLookupEnd-entry.domainLookupStart,
+const result = {valid:true,dns:entry.domainLookupEnd-entry.domainLookupStart,
 connection:entry.connectEnd-entry.connectStart,
 tls:entry.secureConnectionStart ? entry.connectEnd-entry.secureConnectionStart : 0,
 firstByte:entry.responseStart-entry.requestStart,
 document:entry.loadEventEnd};
+if (document.visibilityState !== 'visible') return result;
+return new Promise(resolve => {
+    const deltas = [];
+    let last = 0;
+    let animation = 0;
+    const finish = () => {
+        cancelAnimationFrame(animation);
+        if (deltas.length < 5 || document.visibilityState !== 'visible') {
+            resolve(result);
+            return;
+        }
+        result.frameMs = deltas.reduce((sum, delta) => sum + delta, 0) / deltas.length;
+        result.fps = 1000 / result.frameMs;
+        if (deltas.length >= 100) {
+            const slowest = deltas.sort((a, b) => b - a).slice(0, Math.ceil(deltas.length / 100));
+            result.lowFps = 1000 * slowest.length / slowest.reduce((sum, delta) => sum + delta, 0);
+        }
+        resolve(result);
+    };
+    const frame = timestamp => {
+        if (last && timestamp > last) deltas.push(timestamp - last);
+        last = timestamp;
+        animation = requestAnimationFrame(frame);
+    };
+    animation = requestAnimationFrame(frame);
+    setTimeout(finish, 1250);
+});
 )JS";
     for (const auto& script : scripts_) {
         // The source is serialized as data. Script syntax cannot alter the URL
@@ -116,6 +144,7 @@ document:entry.loadEventEnd};
     options->SetString("expression", source);
     options->SetBool("returnByValue", true);
     options->SetBool("silent", true);
+    if (timing_) options->SetBool("awaitPromise", true);
     stage_ = Stage::execute;
     Send("Runtime.evaluate", options);
 }

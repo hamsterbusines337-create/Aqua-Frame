@@ -6,6 +6,7 @@
 #include "../navigation/address.h"
 #include "include/cef_frame.h"
 #include "include/cef_app.h"
+#include "include/cef_version.h"
 #include <algorithm>
 #include <charconv>
 #include <iterator>
@@ -729,6 +730,7 @@ void Window::MeasureNavigation() {
     }
     if (timing_run_) timing_run_->Cancel();
     timing_tab_ = selected_;
+    performance_before_ = SampleBrowserProcesses();
     timing_run_ = new ScriptRun(browser->GetHost(), std::move(url),
         [this, id = selected_](std::optional<NavigationTiming> result) {
             timing_result_ = std::move(result);
@@ -747,12 +749,36 @@ void Window::ShowNavigationTiming(uint64_t tab) {
         MessageBoxW(hwnd_, L"Данные загрузки страницы пока недоступны.", L"Aqua Performance", MB_OK);
         return;
     }
-    wchar_t report[480]{};
-    swprintf_s(report, L"DNS: %.1f мс\nСоединение: %.1f мс\nTLS: %.1f мс\n"
+    wchar_t data[700]{};
+    swprintf_s(data, L"DNS: %.1f мс\nСоединение: %.1f мс\nTLS: %.1f мс\n"
         L"Первый байт ответа (TTFB): %.1f мс\nЗагрузка документа: %.1f мс\n\n"
-        L"Показатели последней загрузки документа. При использовании кэша или готового соединения некоторые интервалы равны нулю.",
+        L"При использовании кэша или готового соединения некоторые интервалы равны нулю.\n\n",
         timing->dns, timing->connection, timing->tls, timing->first_byte, timing->document);
-    MessageBoxW(hwnd_, report, L"Aqua Performance", MB_OK | MB_ICONINFORMATION);
+    std::wstring report = data;
+    if (timing->page_fps > 0) {
+        swprintf_s(data, L"Кадры страницы (rAF): %.1f FPS · %.2f мс на кадр\n",
+                   timing->page_fps, timing->page_frame_ms);
+        report += data;
+        if (timing->low_fps > 0) {
+            swprintf_s(data, L"1%% low страницы: %.1f FPS\n", timing->low_fps);
+            report += data;
+        }
+    }
+    const auto after = SampleBrowserProcesses();
+    const auto cpu = BrowserCpuPercent(performance_before_, after);
+    uint64_t working_set = 0;
+    for (const auto& process : after.processes) working_set += process.working_set;
+    if (cpu >= 0) {
+        swprintf_s(data, L"CPU браузера: %.1f%%\n", cpu);
+        report += data;
+    }
+    swprintf_s(data, L"Рабочие наборы процессов: %.1f МиБ\nПроцессов: %zu · Вкладок: %zu\n"
+                     L"Chromium %d.%d.%d.%d · CEF %d.%d.%d\n",
+        static_cast<double>(working_set) / (1024 * 1024), after.processes.size(), tabs_.size(),
+        CHROME_VERSION_MAJOR, CHROME_VERSION_MINOR, CHROME_VERSION_BUILD, CHROME_VERSION_PATCH,
+        CEF_VERSION_MAJOR, CEF_VERSION_MINOR, CEF_VERSION_PATCH);
+    report += data;
+    MessageBoxW(hwnd_, report.c_str(), L"Aqua Performance", MB_OK | MB_ICONINFORMATION);
 }
 
 int Window::ContentTop() {
