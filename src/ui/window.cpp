@@ -7,6 +7,7 @@
 #include "include/cef_frame.h"
 #include "include/cef_app.h"
 #include <algorithm>
+#include <iterator>
 #include <commctrl.h>
 #include <dwmapi.h>
 #include <shellapi.h>
@@ -168,6 +169,7 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
             RECT r{};
             GetClientRect(hwnd_, &r);
             if (point.x >= r.right - Scale(44)) Menu();
+            else if (point.x >= r.right - Scale(78)) OpenExtensions();
             else if (auto b = Current()) {
                 if (point.x < Scale(38)) b->GoBack();
                 else if (point.x < Scale(70)) b->GoForward();
@@ -244,8 +246,8 @@ void Window::Layout() {
     if (font_) DeleteObject(font_);
     font_ = new_font;
     const auto* tab = Find(selected_);
-    const int address_left = Scale(tab && IsSettings(tab->url) ? 219 : 112);
-    MoveWindow(edit_, address_left, Scale(48), std::max(0L, r.right - address_left - Scale(59)), Scale(23), TRUE);
+    const int address_left = Scale(tab && IsSettings(tab->url) ? 236 : 112);
+    MoveWindow(edit_, address_left, Scale(47), std::max(0L, r.right - address_left - Scale(92)), Scale(22), TRUE);
     if (auto browser = Current()) {
         if (const auto child = browser->GetHost()->GetWindowHandle())
             MoveWindow(child, 0, Scale(76), r.right, std::max(0L, r.bottom - Scale(76)), TRUE);
@@ -267,11 +269,12 @@ void Window::Paint() {
     const auto old_brush = SelectObject(dc, GetStockObject(DC_BRUSH));
     const auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
     Fill(dc, {0, Scale(36), r.right, Scale(76)}, colors.toolbar);
-    Rounded(dc, {Scale(101), Scale(42), r.right - Scale(48), Scale(71)}, Scale(8), colors.border);
-    Rounded(dc, {Scale(102), Scale(43), r.right - Scale(49), Scale(70)}, Scale(8), colors.background);
+    Rounded(dc, {Scale(101), Scale(42), r.right - Scale(81), Scale(71)}, Scale(8), colors.border);
+    Rounded(dc, {Scale(102), Scale(43), r.right - Scale(82), Scale(70)}, Scale(8), colors.background);
     if (selected && IsSettings(selected->url)) {
         Label(dc, {Scale(113), Scale(43), Scale(130), Scale(70)}, L"A", colors.accent, DT_CENTER);
-        Label(dc, {Scale(133), Scale(43), Scale(215), Scale(70)}, L"Aqua Frame  │", colors.text, DT_END_ELLIPSIS);
+        Label(dc, {Scale(135), Scale(43), Scale(222), Scale(70)}, L"Aqua Frame", colors.text, DT_END_ELLIPSIS);
+        Fill(dc, {Scale(224), Scale(49), Scale(225), Scale(64)}, colors.border);
     }
     for (size_t i = 0; i < tabs_.size(); ++i) {
         RECT tab = TabBounds(i);
@@ -289,6 +292,23 @@ void Window::Paint() {
     Label(dc, {Scale(6), Scale(36), Scale(38), Scale(76)}, L"←", colors.text, DT_CENTER);
     Label(dc, {Scale(38), Scale(36), Scale(70), Scale(76)}, L"→", colors.text, DT_CENTER);
     Label(dc, {Scale(70), Scale(36), Scale(102), Scale(76)}, L"↻", colors.text, DT_CENTER);
+    // Outline the extension control with the same 16-DIP stroke icon as the
+    // settings sidebar, using the native toolbar paint path.
+    constexpr POINT puzzle[]{{1, 4}, {6, 4}, {6, 2}, {7, 1}, {9, 1}, {10, 2},
+        {10, 4}, {15, 4}, {15, 8}, {17, 8}, {18, 9}, {18, 11}, {17, 12},
+        {15, 12}, {15, 16}, {10, 16}, {10, 14}, {9, 13}, {7, 13}, {6, 14},
+        {6, 16}, {1, 16}, {1, 12}, {3, 12}, {4, 11}, {4, 9}, {3, 8}, {1, 8}, {1, 4}};
+    POINT icon[std::size(puzzle)]{};
+    for (size_t i = 0; i < std::size(puzzle); ++i) {
+        icon[i] = {r.right - Scale(70) + Scale(puzzle[i].x), Scale(47) + Scale(puzzle[i].y)};
+    }
+    const auto icon_pen = CreatePen(PS_SOLID, std::max(1, Scale(1)), colors.text);
+    if (icon_pen) {
+        SelectObject(dc, icon_pen);
+        Polyline(dc, icon, static_cast<int>(std::size(icon)));
+        SelectObject(dc, GetStockObject(NULL_PEN));
+        DeleteObject(icon_pen);
+    }
     Label(dc, {r.right - Scale(44), Scale(36), r.right, Scale(76)}, L"☰", colors.text, DT_CENTER);
     SelectObject(dc, old_pen);
     SelectObject(dc, old_brush);
