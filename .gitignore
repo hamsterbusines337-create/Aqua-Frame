@@ -3,3 +3,7 @@
 /third_party/cef/
 /third_party/downloads/
 /third_party/.cef-*/
+/ios/*.xcodeproj/
+/ios/build/
+/ios/*.xcresult/
+/ios/*.zip

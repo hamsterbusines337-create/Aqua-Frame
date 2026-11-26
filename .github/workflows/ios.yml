@@ -1,0 +1,48 @@
+name: Aqua Frame iPhone
+on:
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  simulator:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Generate Xcode project
+        run: |
+          brew install xcodegen
+          cd ios
+          xcodegen generate
+      - name: Run iPhone simulator tests
+        working-directory: ios
+        run: |
+          set -euo pipefail
+          device="$(xcrun simctl list devices booted available -j | python3 -c 'import json,sys; print(next((d["udid"] for ds in json.load(sys.stdin)["devices"].values() for d in ds if d["name"].startswith("iPhone")), ""))')"
+          if [ -z "$device" ]; then
+            device="$(xcrun simctl list devices available -j | python3 -c 'import json,sys; print(next(d["udid"] for _, ds in sorted(json.load(sys.stdin)["devices"].items(), reverse=True) for d in ds if d["name"].startswith("iPhone")))')"
+            xcrun simctl boot "$device"
+          fi
+          xcrun simctl bootstatus "$device" -b
+          xcodebuild -project AquaFrame.xcodeproj -scheme AquaFrame -destination "platform=iOS Simulator,id=$device" -derivedDataPath build -parallel-testing-enabled NO -resultBundlePath AquaFrameTests.xcresult CODE_SIGNING_ALLOWED=NO test
+      - name: Package simulator build
+        working-directory: ios
+        run: ditto -c -k --keepParent build/Build/Products/Debug-iphonesimulator/AquaFrame.app AquaFrame-iPhone-Simulator.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: AquaFrame-iPhone-Simulator
+          path: ios/AquaFrame-iPhone-Simulator.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: ${{ !cancelled() }}
+        with:
+          name: AquaFrame-iPhone-Test-Results
+          path: ios/AquaFrameTests.xcresult
+          if-no-files-found: ignore
