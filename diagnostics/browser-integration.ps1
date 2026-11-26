@@ -149,17 +149,33 @@ $port = 39176
 $site = "http://127.0.0.1:$port"
 $env:AQUA_BROWSER_PROBE = Join-Path $env:RUNNER_TEMP 'aqua-browser-probe.log'
 $settings = Join-Path $env:LOCALAPPDATA 'Aqua Frame/User Data/aqua-settings.json'
-$server = Start-Process python -ArgumentList @('diagnostics/browser-fixture.py', $port) -PassThru
+$serverErrors = Join-Path $env:RUNNER_TEMP 'aqua-browser-fixture.stderr'
+$server = Start-Process python -ArgumentList @('diagnostics/browser-fixture.py', $port) -PassThru -RedirectStandardError $serverErrors
 $process = $null
 $exe = Join-Path $PWD 'runtime/AquaFrame.exe'
 try {
+    $ready = $false
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        try {
+            $reply = Invoke-WebRequest "$site/ready" -TimeoutSec 1 -NoProxy
+            $ready = $reply.StatusCode -eq 200
+        } catch {
+            Start-Sleep -Milliseconds 300
+        }
+        if ($ready -or $server.HasExited) { break }
+    }
+    if (!$ready) { throw "HTTP fixture did not start: $(Get-Content $serverErrors -Raw)" }
     $process = Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
     $window = Window-For 'AquaFrame.Main' 'Aqua Frame' 30
     if ($window -eq $zero -or $server.HasExited) { throw 'The fixture or Aqua Frame did not start.' }
     Position $window
     [void][AquaWindowUi]::SetForegroundWindow($window)
     Start-Sleep -Seconds 3
-    Open-Address $window "$site/normal"
+    for ($attempt = 0; $attempt -lt 3; $attempt++) {
+        Open-Address $window "$site/normal"
+        if ((Request-Log) -match '(?m)^/normal\|') { break }
+    }
+    Screenshot $window 'browser-normal.png'
     Wait-Request '(?m)^/normal\|'
     Click-At $window 400 240
     [Windows.Forms.SendKeys]::SendWait('^d')
@@ -240,4 +256,6 @@ try {
         if (!$process.WaitForExit(15000)) { Stop-Process -Id $process.Id -Force }
     }
     if (!$server.HasExited) { Stop-Process -Id $server.Id -Force }
+    Write-Host (Request-Log)
+    Get-Content $serverErrors -ErrorAction Continue
 }
