@@ -47,26 +47,23 @@ public static class DropFixture {
             form.Location = new Point(3, 3);
             form.ClientSize = new Size(110, 48);
             form.TopMost = true;
-            using (var start = new Timer { Interval = 350 })
-            using (var move = new Timer { Interval = 500 }) {
-                int phase = 0;
-                move.Tick += (sender, args) => {
-                    if (phase++ == 0) SetCursorPos(x, y);
-                    else { move.Stop(); mouse_event(4, 0, 0, 0, UIntPtr.Zero); }
-                };
-                form.MouseDown += (sender, args) => {
-                    var data = new DataObject();
-                    data.SetData(DataFormats.FileDrop, new[] { path });
-                    move.Start();
-                    result = form.DoDragDrop(data, DragDropEffects.Copy);
-                    move.Stop();
-                    form.Close();
-                };
+            using (var start = new Timer { Interval = 500 }) {
                 start.Tick += (sender, args) => {
                     start.Stop();
                     var source = form.PointToScreen(new Point(45, 24));
                     SetCursorPos(source.X, source.Y);
                     mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+                    var data = new DataObject();
+                    data.SetData(DataFormats.FileDrop, new[] { path });
+                    using (var movement = new System.Threading.Timer(_ => {
+                        SetCursorPos(x, y);
+                        System.Threading.Thread.Sleep(850);
+                        mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+                    }, null, 500, System.Threading.Timeout.Infinite)) {
+                        result = form.DoDragDrop(data, DragDropEffects.Copy);
+                    }
+                    mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+                    form.Close();
                 };
                 form.Shown += (sender, args) => { form.Activate(); start.Start(); };
                 Application.Run(form);
@@ -150,6 +147,7 @@ try {
     Start-Sleep -Milliseconds 500
     $x = [int](($r.Left + $r.Right) / 2)
     $y = [int](($r.Top + $r.Bottom) / 2)
+    Write-Host "Running OLE drag against $x,$y"
     $effect = [DropFixture]::Drag($archive, $x, $y)
     Write-Host "OLE drag result: $effect"
     $deadline = (Get-Date).AddSeconds(20)
