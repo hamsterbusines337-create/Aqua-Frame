@@ -78,6 +78,7 @@ a{color:#7dd3fc}
 
 std::mutex page_mutex;
 Preferences page_preferences;
+std::vector<Script> page_scripts;
 
 class PageBytes final : public CefBaseRefCounted {
 public:
@@ -128,7 +129,7 @@ public:
             }
         } else if (url == "aqua://settings/" || url.starts_with("aqua://settings/#")) {
             const std::scoped_lock lock(page_mutex);
-            page = RenderSettings(page_preferences);
+            page = RenderSettings(page_preferences, page_scripts);
         } else if (url == "aqua://welcome/") {
             page = welcome;
         } else {
@@ -176,4 +177,11 @@ void UpdateAquaPageSettings(const Preferences& settings) {
     page_preferences.restore_session = settings.restore_session;
     page_preferences.zoom = settings.zoom;
 }
+void UpdateAquaScriptList(const std::vector<Script>& scripts) {
+    const std::scoped_lock lock(page_mutex);
+    page_scripts.clear();
+    for (const auto& script : scripts)
+        page_scripts.push_back({script.id, script.name, script.origin, {}, script.enabled});
+}
+
 }

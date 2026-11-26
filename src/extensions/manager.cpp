@@ -67,9 +67,20 @@ private:
     IMPLEMENT_REFCOUNTING(InstallHelp);
 };
 
+class OpenScripts final : public CefButtonDelegate {
+public:
+    explicit OpenScripts(std::function<void()> callback) : callback_(std::move(callback)) {}
+    void OnThemeChanged(CefRefPtr<CefView> view) override { view->SetBackgroundColor(aqua_toolbar); }
+    void OnButtonPressed(CefRefPtr<CefButton>) override { callback_(); }
+private:
+    std::function<void()> callback_;
+    IMPLEMENT_REFCOUNTING(OpenScripts);
+};
+
 class ManagerWindow final : public CefWindowDelegate {
 public:
-    explicit ManagerWindow(CefRefPtr<CefBrowserView> view) : view_(view) {}
+    ManagerWindow(CefRefPtr<CefBrowserView> view, std::function<void()> open_scripts)
+        : view_(view), open_scripts_(std::move(open_scripts)) {}
 
     cef_runtime_style_t GetWindowRuntimeStyle() override {
         return CEF_RUNTIME_STYLE_CHROME;
@@ -91,7 +102,11 @@ public:
 
         auto toolbar = CefPanel::CreatePanel(nullptr);
         toolbar->SetBackgroundColor(aqua_toolbar);
-        toolbar->SetToFillLayout();
+        CefBoxLayoutSettings row;
+        row.horizontal = true;
+        row.inside_border_horizontal_spacing = 8;
+        row.between_child_spacing = 8;
+        toolbar->SetToBoxLayout(row);
         auto help = CefLabelButton::CreateLabelButton(new InstallHelp, L"Как перетащить файл");
         help->SetMinimumSize(CefSize(0, 42));
         help->SetEnabledTextColors(aqua_accent);
@@ -99,6 +114,12 @@ public:
         help->SetFontList("Segoe UI, 13px");
         help->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         toolbar->AddChildView(help);
+        auto scripts = CefLabelButton::CreateLabelButton(new OpenScripts(open_scripts_), L"Aqua Scripts · импорт JS");
+        scripts->SetMinimumSize(CefSize(0, 42));
+        scripts->SetEnabledTextColors(aqua_accent);
+        scripts->SetBackgroundColor(aqua_toolbar);
+        scripts->SetFontList("Segoe UI, 13px");
+        toolbar->AddChildView(scripts);
 
         window->AddChildView(toolbar);
         window->AddChildView(view_);
@@ -117,6 +138,7 @@ public:
 
 private:
     CefRefPtr<CefBrowserView> view_;
+    std::function<void()> open_scripts_;
 
     IMPLEMENT_REFCOUNTING(ManagerWindow);
 };
@@ -126,8 +148,9 @@ bool IsManagerPage(const std::string& url) {
 }
 }
 
-ExtensionManager::ExtensionManager(HWND owner, std::function<void(std::wstring)> open_web_tab)
-    : owner_(owner), open_web_tab_(std::move(open_web_tab)) {}
+ExtensionManager::ExtensionManager(HWND owner, std::function<void(std::wstring)> open_web_tab,
+                                   std::function<void()> open_scripts)
+    : owner_(owner), open_web_tab_(std::move(open_web_tab)), open_scripts_(std::move(open_scripts)) {}
 
 bool ExtensionManager::Open() {
     if (closing_) return false;
@@ -159,7 +182,7 @@ bool ExtensionManager::Open() {
     auto view = CefBrowserView::CreateBrowserView(this, extensions_url, settings,
                                                   nullptr, context, new ManagerBrowserView);
     opening_ = true;
-    if (view && CefWindow::CreateTopLevelWindow(new ManagerWindow(view))) return true;
+    if (view && CefWindow::CreateTopLevelWindow(new ManagerWindow(view, open_scripts_))) return true;
 
     opening_ = false;
     if (first_window) context->SetChromeColorScheme(previous_theme_, previous_color_);

@@ -45,6 +45,20 @@ constexpr std::array sections{
     Section{"about", "О браузере", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 8v6m0-10v1"}
 };
 
+std::string Escape(std::string_view text) {
+    std::string output;
+    for (const auto ch : text) {
+        switch (ch) {
+        case '&': output += "&amp;"; break;
+        case '<': output += "&lt;"; break;
+        case '>': output += "&gt;"; break;
+        case '"': output += "&quot;"; break;
+        default: output += ch; break;
+        }
+    }
+    return output;
+}
+
 constexpr auto css = R"HTML(
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Настройки</title><style>
@@ -130,7 +144,7 @@ SettingsAction ParseSettingsAction(std::string_view url) {
     return Action::unknown;
 }
 
-std::string RenderSettings(const Preferences& settings) {
+std::string RenderSettings(const Preferences& settings, const std::vector<Script>& scripts) {
     std::string html = settings.theme == Theme::contrast
         ? "<!doctype html><html lang=\"ru\" class=\"contrast\">"
         : "<!doctype html><html lang=\"ru\">";
@@ -174,8 +188,21 @@ std::string RenderSettings(const Preferences& settings) {
     html += R"HTML(</div></section><section id="extensions"><h2>Расширения</h2><div class="card">)HTML";
     html += Link("extensions", "Открыть менеджер");
     html += R"HTML(</div></section>
-<section id="scripts"><h2>Aqua Scripts</h2><div class="card"><p>Менеджер пользовательских скриптов пока недоступен в этой сборке.</p></div></section>
-<section id="security"><h2>Безопасность</h2><div class="card"><h3>Chromium Sandbox</h3><p>Aqua Frame запускается с включённой песочницей Chromium и использует проверку сертификатов Chromium.</p></div></section>
+<section id="scripts"><h2>Aqua Scripts</h2><div class="card"><h3>Импорт JavaScript</h3>
+<p>Откройте сайт, для которого нужен скрипт. Затем выберите файл .js или .user.js либо перетащите его из Проводника на верхнюю панель Aqua Frame. Скрипт запустится при следующей загрузке разрешённого сайта.</p>)HTML";
+    html += Link("script-import", "Выбрать файл JS");
+    html += "</div>";
+    if (scripts.empty()) html += "<div class=\"card\"><p>Скриптов пока нет.</p></div>";
+    for (const auto& script : scripts) {
+        html += "<div class=\"card\"><h3>" + Escape(script.name) + "</h3><p>" +
+            Escape(script.origin) + (script.enabled ? " · Включён" : " · Выключен") + "</p>";
+        html += Link((script.enabled ? "script-disable/" : "script-enable/") + script.id,
+                     script.enabled ? "Выключить" : "Включить");
+        html += " ";
+        html += Link("script-remove/" + script.id, "Удалить");
+        html += "</div>";
+    }
+    html += R"HTML(</section><section id="security"><h2>Безопасность</h2><div class="card"><h3>Chromium Sandbox</h3><p>Aqua Frame запускается с включённой песочницей Chromium и использует проверку сертификатов Chromium.</p></div></section>
 <section id="privacy"><h2>Конфиденциальность</h2><div class="card"><h3>Локальные данные</h3><p>Полный сброс удаляет локальный профиль после подтверждения.</p><a class="button" href="#reset">Открыть сброс браузера</a></div></section>
 <section id="search"><h2>Поисковая система</h2><div class="card"><h3>Поиск по умолчанию</h3><p>Используется в адресной строке и на стартовой странице.</p>)HTML";
     html += SearchDropdown(settings);

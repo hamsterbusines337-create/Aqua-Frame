@@ -7,12 +7,19 @@ namespace aqua {
 bool Client::OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                             CefRefPtr<CefRequest> request, bool user_gesture, bool is_redirect) {
     const auto target = request->GetURL().ToString();
-    if (!target.starts_with("aqua://settings/action/")) return false;
+    if (!target.starts_with("aqua://settings/action/")) {
+        if (frame->IsMain() && script_run_) {
+            script_run_->Cancel();
+            script_run_ = nullptr;
+        }
+        return false;
+    }
 
     const auto source = frame->GetURL().ToString();
     if (!browser->IsPopup() && frame->IsMain() && request->GetMethod() == "GET" &&
         user_gesture && !is_redirect &&
         (source == "aqua://settings/" || source.starts_with("aqua://settings/#"))) {
+        if (source == "aqua://settings/#scripts" && window_.QueueScriptAction(tab_, target)) return true;
         const auto action = ParseSettingsAction(target);
         if (action != SettingsAction::unknown) window_.QueueSettingsAction(tab_, action);
     }
@@ -38,7 +45,21 @@ bool Client::DoClose(CefRefPtr<CefBrowser> browser) {
 }
 
 void Client::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
+    if (script_run_) {
+        script_run_->Cancel();
+        script_run_ = nullptr;
+    }
     if (!browser->IsPopup()) window_.BrowserClosed(tab_);
+}
+
+void Client::OnLoadEnd(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame, int status) {
+    if (browser->IsPopup() || !frame->IsMain() || status < 200 || status >= 400) return;
+    auto url = frame->GetURL().ToString();
+    auto scripts = window_.ScriptsFor(url);
+    if (scripts.empty()) return;
+    if (script_run_) script_run_->Cancel();
+    script_run_ = new ScriptRun(browser->GetHost(), std::move(url), std::move(scripts));
+    script_run_->Start();
 }
 
 void Client::OnTitleChange(CefRefPtr<CefBrowser> browser, const CefString& title) {

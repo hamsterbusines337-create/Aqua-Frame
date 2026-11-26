@@ -9,7 +9,8 @@
 namespace aqua {
 class ExtensionManager final : public CefClient, public CefLifeSpanHandler, public CefRequestHandler {
 public:
-    ExtensionManager(HWND owner, std::function<void(std::wstring)> open_web_tab);
+    ExtensionManager(HWND owner, std::function<void(std::wstring)> open_web_tab,
+                     std::function<void()> open_scripts);
     bool Open();
     void Close();
     bool HasBrowsers() const;
@@ -30,6 +31,7 @@ private:
 
     HWND owner_;
     std::function<void(std::wstring)> open_web_tab_;
+    std::function<void()> open_scripts_;
     cef_color_variant_t previous_theme_ = CEF_COLOR_VARIANT_SYSTEM;
     cef_color_t previous_color_ = 0;
     bool opening_ = false;

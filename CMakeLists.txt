@@ -25,6 +25,8 @@ add_library(AquaFrame SHARED
   src/navigation/address.cpp
   src/profiles/profile.cpp
   src/reset/restart.cpp
+  src/scripts/library.cpp
+  src/scripts/runner.cpp
   src/settings/page.cpp
   src/settings/preferences.cpp
   src/ui/window.cpp
@@ -35,7 +37,7 @@ target_compile_definitions(AquaFrame PRIVATE UNICODE _UNICODE NOMINMAX)
 target_compile_options(AquaFrame PRIVATE $<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
 target_link_libraries(AquaFrame PRIVATE libcef_lib libcef_dll_wrapper
   ${CEF_STANDARD_LIBS}
-  comctl32 shell32 ole32 oleaut32 urlmon dwmapi)
+  comctl32 comdlg32 shell32 ole32 oleaut32 urlmon dwmapi)
 COPY_SINGLE_FILE(AquaFrame "${CEF_BINARY_DIR}/bootstrap.exe" "${CEF_TARGET_OUT_DIR}/AquaFrame.exe")
 COPY_FILES(AquaFrame "${CEF_BINARY_FILES}" "${CEF_BINARY_DIR}" "${CEF_TARGET_OUT_DIR}")
 COPY_FILES(AquaFrame "${CEF_RESOURCE_FILES}" "${CEF_RESOURCE_DIR}" "${CEF_TARGET_OUT_DIR}")

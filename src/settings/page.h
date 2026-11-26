@@ -1,5 +1,6 @@
 #pragma once
 #include "preferences.h"
+#include "../scripts/library.h"
 
 namespace aqua {
 enum class SettingsAction {
@@ -8,5 +9,5 @@ enum class SettingsAction {
     open_extensions, open_downloads, reset_preferences, factory_reset, unknown
 };
 SettingsAction ParseSettingsAction(std::string_view url);
-std::string RenderSettings(const Preferences& settings);
+std::string RenderSettings(const Preferences& settings, const std::vector<Script>& scripts = {});
 }

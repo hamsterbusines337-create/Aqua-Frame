@@ -1,18 +1,21 @@
 #pragma once
 
 #include "include/cef_client.h"
+#include "../scripts/runner.h"
 #include <cstdint>
 
 namespace aqua {
 class Window;
 class Client final : public CefClient, public CefDisplayHandler,
-                     public CefLifeSpanHandler, public CefKeyboardHandler, public CefRequestHandler {
+                     public CefLifeSpanHandler, public CefKeyboardHandler, public CefRequestHandler, public CefLoadHandler {
 public:
     Client(Window& window, uint64_t tab) : window_(window), tab_(tab) {}
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
+    void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int status) override;
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>,
                         bool user_gesture, bool is_redirect) override;
     bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
@@ -29,6 +32,7 @@ public:
 private:
     Window& window_;
     uint64_t tab_;
+    CefRefPtr<ScriptRun> script_run_;
     IMPLEMENT_REFCOUNTING(Client);
 };
 }

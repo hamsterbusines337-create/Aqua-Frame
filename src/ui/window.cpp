@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <iterator>
 #include <commctrl.h>
+#include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
 #include <shlobj.h>
@@ -18,6 +19,7 @@ namespace aqua {
 namespace {
 constexpr UINT close_browser_window = WM_APP + 1;
 constexpr UINT apply_settings = WM_APP + 2;
+constexpr UINT process_script_action = WM_APP + 3;
 struct Palette {
     COLORREF background, toolbar, active, inactive, text, muted, accent, border;
 };
@@ -55,6 +57,8 @@ void Label(HDC dc, RECT area, const std::wstring& value, COLORREF color, UINT fl
 bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& profile) {
     profile_ = profile;
     preferences_ = ReadPreferences(profile_);
+    scripts_.Load(profile_);
+    UpdateAquaScriptList(scripts_.Items());
     UpdateAquaPageSettings(preferences_);
     WNDCLASSW wc{};
     wc.hInstance = instance;
@@ -73,7 +77,9 @@ bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& p
     }
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd_, 20, &dark, sizeof(dark));
-    extensions_ = new ExtensionManager(hwnd_, [this](const std::wstring& url) { AddTab(url); });
+    extensions_ = new ExtensionManager(hwnd_, [this](const std::wstring& url) { AddTab(url); },
+        [this] { OpenScriptManager(); });
+    DragAcceptFiles(hwnd_, TRUE);
     ShowWindow(hwnd_, show);
     const auto marker = profile_ / first_run_marker;
     if (GetFileAttributesW(marker.c_str()) != INVALID_FILE_ATTRIBUTES) {
@@ -186,6 +192,28 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
             const auto child = tab->browser->GetHost()->GetWindowHandle();
             if (child && IsChild(hwnd_, child)) DestroyWindow(child);
         }
+        return 0;
+    case WM_DROPFILES: {
+        const auto drop = reinterpret_cast<HDROP>(w);
+        std::filesystem::path candidate;
+        if (DragQueryFileW(drop, 0xffffffff, nullptr, 0) == 1) {
+            const auto length = DragQueryFileW(drop, 0, nullptr, 0);
+            if (length && length < 32768) {
+                std::wstring buffer(static_cast<size_t>(length) + 1, L'\0');
+                if (DragQueryFileW(drop, 0, buffer.data(), length + 1) == length) {
+                    buffer.resize(length);
+                    candidate = buffer;
+                }
+            }
+        }
+        DragFinish(drop);
+        if (!exiting_ && !candidate.empty() &&
+            CompareStringOrdinal(candidate.extension().c_str(), -1, L".js", -1, TRUE) == CSTR_EQUAL)
+            ImportScript(candidate);
+        return 0;
+    }
+    case process_script_action:
+        RunScriptAction();
         return 0;
     case apply_settings:
         ApplySettingsAction(static_cast<uint64_t>(w), static_cast<SettingsAction>(l));
@@ -385,6 +413,8 @@ void Window::Select(uint64_t id) {
     }
     selected_ = id;
     if (auto* tab = Find(id)) {
+        const auto origin = WebOrigin(CefString(tab->url).ToString());
+        if (!origin.empty()) last_web_origin_ = origin;
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
         if (tab->browser) ShowWindow(tab->browser->GetHost()->GetWindowHandle(), SW_SHOWNA);
     }
@@ -396,7 +426,11 @@ void Window::AddressChanged(uint64_t id, const CefString& address) {
     if (!tab) return;
     const auto was_settings = IsSettings(tab->url);
     tab->url = address.ToWString();
-    if (id == selected_ && was_settings != IsSettings(tab->url)) Layout();
+    if (id == selected_) {
+        const auto origin = WebOrigin(address.ToString());
+        if (!origin.empty()) last_web_origin_ = origin;
+        if (was_settings != IsSettings(tab->url)) Layout();
+    }
     if (tab->browser) ApplyZoom(tab->browser, tab->url);
     if (id == selected_ && GetFocus() != edit_)
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
@@ -477,6 +511,122 @@ void Window::OpenExtensions() {
     if (!exiting_ && !extensions_->Open()) {
         MessageBoxW(hwnd_, L"Не удалось открыть менеджер расширений.", L"Aqua Frame", MB_OK | MB_ICONERROR);
     }
+}
+
+void Window::OpenScriptManager() {
+    if (exiting_) return;
+    for (const auto& tab : tabs_) {
+        if (!tab.closing && tab.url == L"aqua://settings/#scripts") {
+            Select(tab.id);
+            SetForegroundWindow(hwnd_);
+            return;
+        }
+    }
+    AddTab(L"aqua://settings/#scripts");
+    SetForegroundWindow(hwnd_);
+}
+
+bool Window::QueueScriptAction(uint64_t tab, std::string_view target) {
+    constexpr std::string_view prefix = "aqua://settings/action/script-";
+    if (!target.starts_with(prefix)) return false;
+    target.remove_prefix(prefix.size());
+    const auto slash = target.find('/');
+    const auto action = target.substr(0, slash);
+    const auto id = slash == std::string_view::npos ? std::string_view{} : target.substr(slash + 1);
+    const bool valid = (action == "import" && slash == std::string_view::npos) ||
+        ((action == "enable" || action == "disable" || action == "remove") && id.size() == 36 &&
+         id.find_first_not_of("0123456789ABCDEFabcdef-") == std::string_view::npos);
+    if (valid && !script_action_) {
+        script_action_.emplace(PendingScriptAction{tab, std::string(action), std::string(id)});
+        if (!PostMessageW(hwnd_, process_script_action, 0, 0)) script_action_.reset();
+    }
+    return true;
+}
+
+void Window::RunScriptAction() {
+    if (!script_action_) return;
+    auto action = std::move(*script_action_);
+    script_action_.reset();
+    const auto* tab = Find(action.tab);
+    if (exiting_ || !tab || tab->closing || selected_ != action.tab ||
+        tab->url != L"aqua://settings/#scripts") return;
+    if (action.action == "import") {
+        PickScriptFile();
+        return;
+    }
+
+    auto next = scripts_.Items();
+    const auto item = std::ranges::find(next, action.script, &Script::id);
+    if (item == next.end()) return;
+    if (action.action == "remove") next.erase(item);
+    else item->enabled = action.action == "enable";
+    if (scripts_.Save(std::move(next))) RefreshScriptSettings();
+    else MessageBoxW(hwnd_, L"Не удалось сохранить список скриптов.", L"Aqua Scripts", MB_OK | MB_ICONERROR);
+}
+
+void Window::PickScriptFile() {
+    if (last_web_origin_.empty()) {
+        MessageBoxW(hwnd_, L"Сначала откройте сайт, которому хотите разрешить скрипт.",
+                    L"Aqua Scripts", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    std::wstring path(32768, L'\0');
+    OPENFILENAMEW chooser{};
+    chooser.lStructSize = sizeof(chooser);
+    chooser.hwndOwner = hwnd_;
+    chooser.lpstrTitle = L"Импорт JavaScript в Aqua Frame";
+    chooser.lpstrFilter = L"JavaScript (*.js; *.user.js)\0*.js\0\0";
+    chooser.lpstrFile = path.data();
+    chooser.nMaxFile = static_cast<DWORD>(path.size());
+    chooser.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT;
+    if (GetOpenFileNameW(&chooser)) ImportScript(path.c_str());
+}
+
+void Window::ImportScript(const std::filesystem::path& path) {
+    const auto origin = last_web_origin_;
+    if (origin.empty()) {
+        MessageBoxW(hwnd_, L"Сначала откройте сайт, которому хотите разрешить скрипт.",
+                    L"Aqua Scripts", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    Script item;
+    if (!scripts_.Add(path, origin, item)) {
+        MessageBoxW(hwnd_, L"Нужен файл .js или .user.js в UTF-8, до 512 КБ. "
+            L"Поддерживается до 16 скриптов, без GM API, @require и запуска document-start.",
+            L"Aqua Scripts", MB_OK | MB_ICONWARNING);
+        return;
+    }
+    const auto message = L"Разрешить запуск скрипта «" + CefString(item.name).ToWString() +
+        L"» на сайте:\n\n" + CefString(origin).ToWString() +
+        L"\n\nСкрипт сможет читать и изменять содержимое этого сайта, в том числе когда вы вошли в аккаунт. "
+        L"Разрешайте запуск только доверенных файлов.";
+    if (MessageBoxW(hwnd_, message.c_str(), L"Разрешение Aqua Scripts",
+        MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES) return;
+    auto next = scripts_.Items();
+    next.push_back(std::move(item));
+    if (!scripts_.Save(std::move(next))) {
+        MessageBoxW(hwnd_, L"Не удалось сохранить скрипт.", L"Aqua Scripts", MB_OK | MB_ICONERROR);
+        return;
+    }
+    RefreshScriptSettings();
+    OpenScriptManager();
+}
+
+void Window::RefreshScriptSettings() {
+    UpdateAquaScriptList(scripts_.Items());
+    for (const auto& item : tabs_) {
+        if (item.browser && !item.closing && item.url == L"aqua://settings/#scripts")
+            item.browser->ReloadIgnoreCache();
+    }
+}
+
+std::vector<Script> Window::ScriptsFor(std::string_view url) const {
+    std::vector<Script> result;
+    if (exiting_) return result;
+    for (const auto& script : scripts_.Items()) {
+        if (RunsOn(script, url)) result.push_back(script);
+    }
+    return result;
 }
 
 void Window::QueueSettingsAction(uint64_t tab, SettingsAction action) {
@@ -584,6 +734,7 @@ void Window::Menu() {
     AppendMenuW(menu, MF_STRING, 3, L"Закрыть вкладку\tCtrl+W");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(menu, MF_STRING, 6, L"Настройки");
+    AppendMenuW(menu, MF_STRING, 7, L"Aqua Scripts — импорт JS");
     AppendMenuW(menu, MF_STRING, 5, L"Расширения — перетащить файл\tCtrl+Shift+E");
     AppendMenuW(menu, MF_STRING, 4, L"О браузере Aqua Frame");
     POINT pos{};
@@ -596,6 +747,7 @@ void Window::Menu() {
     if (action == 3) CloseTab(selected_, false);
     if (action == 5) OpenExtensions();
     if (action == 6) AddTab(L"aqua://settings/");
+    if (action == 7) OpenScriptManager();
     if (action == 4) MessageBoxW(hwnd_, L"Aqua Frame 1.0.0\nAqua Deep Ocean\nBeyond the ordinary.",
                                  L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
 }

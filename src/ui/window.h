@@ -5,6 +5,7 @@
 #include "include/cef_browser.h"
 #include <windows.h>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,8 @@ public:
     bool Create(HINSTANCE instance, int show, const std::filesystem::path& profile);
     bool ResetRequested() const { return reset_requested_; }
     void QueueSettingsAction(uint64_t tab, SettingsAction action);
+    bool QueueScriptAction(uint64_t tab, std::string_view target);
+    std::vector<Script> ScriptsFor(std::string_view url) const;
     void AddTab(const std::wstring& url = L"aqua://newtab/");
     void BrowserCreated(uint64_t tab, CefRefPtr<CefBrowser> browser);
     bool QueueBrowserClose(uint64_t tab);
@@ -42,6 +45,11 @@ private:
     void Navigate();
     void Menu();
     void OpenExtensions();
+    void OpenScriptManager();
+    void RunScriptAction();
+    void PickScriptFile();
+    void ImportScript(const std::filesystem::path& path);
+    void RefreshScriptSettings();
     void ApplySettingsAction(uint64_t tab, SettingsAction action);
     void SaveSession();
     void ApplyZoom(const CefRefPtr<CefBrowser>& browser, std::wstring_view url);
@@ -57,6 +65,14 @@ private:
     CefRefPtr<ExtensionManager> extensions_;
     std::filesystem::path profile_;
     Preferences preferences_;
+    ScriptLibrary scripts_;
+    struct PendingScriptAction {
+        uint64_t tab;
+        std::string action;
+        std::string script;
+    };
+    std::optional<PendingScriptAction> script_action_;
+    std::string last_web_origin_;
     std::vector<Tab> tabs_;
     std::vector<std::wstring> closed_;
     uint64_t next_id_ = 1;
