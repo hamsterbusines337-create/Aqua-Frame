@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../extensions/manager.h"
 #include "include/cef_browser.h"
 #include <windows.h>
 #include <cstdint>
@@ -17,6 +18,7 @@ public:
     void AddressChanged(uint64_t tab, const CefString& address);
     void TitleChanged(uint64_t tab, const CefString& title);
     bool Shortcut(int key, int modifiers);
+    CefRefPtr<CefClient> DefaultChromeClient() const;
 
 private:
     struct Tab {
@@ -36,6 +38,7 @@ private:
     void Select(uint64_t id);
     void Navigate();
     void Menu();
+    void OpenExtensions();
     RECT TabBounds(size_t index) const;
     Tab* Find(uint64_t id);
     CefRefPtr<CefBrowser> Current();
@@ -45,6 +48,7 @@ private:
     HWND edit_ = nullptr;
     HFONT font_ = nullptr;
     HBRUSH address_brush_ = nullptr;
+    CefRefPtr<ExtensionManager> extensions_;
     std::vector<Tab> tabs_;
     std::vector<std::wstring> closed_;
     uint64_t next_id_ = 1;

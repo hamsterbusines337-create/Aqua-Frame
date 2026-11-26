@@ -54,6 +54,7 @@ bool Window::Create(HINSTANCE instance, int show) {
     }
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd_, 20, &dark, sizeof(dark));
+    extensions_ = new ExtensionManager(hwnd_);
     ShowWindow(hwnd_, show);
     AddTab();
     return !tabs_.empty();
@@ -157,14 +158,15 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
         }
         return 0;
     case WM_CLOSE:
-        if (tabs_.empty()) {
-            DestroyWindow(hwnd_);
-        } else {
+        if (!exiting_) {
             exiting_ = true;
+            extensions_->Close();
+
             std::vector<uint64_t> ids;
             for (const auto& tab : tabs_) ids.push_back(tab.id);
             for (auto id : ids) CloseTab(id, true);
         }
+        if (tabs_.empty() && !extensions_->HasBrowsers()) DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
         if (font_) DeleteObject(font_);
@@ -349,6 +351,10 @@ void Window::Navigate() {
     const int length = GetWindowTextLengthW(edit_);
     std::wstring address(static_cast<size_t>(length) + 1, L'\0');
     address.resize(GetWindowTextW(edit_, address.data(), length + 1));
+    if (address == L"aqua://extensions" || address == L"aqua://extensions/") {
+        OpenExtensions();
+        return;
+    }
     const auto url = ResolveAddress(address);
     if (url.empty()) return;
     SetWindowTextW(edit_, url.c_str());
@@ -379,11 +385,25 @@ bool Window::Shortcut(int key, int modifiers) {
         CloseTab(selected_, false);
         return true;
     }
+    if (key == 'E' && (modifiers & EVENTFLAG_SHIFT_DOWN)) {
+        OpenExtensions();
+        return true;
+    }
     if (key == 'R') {
         if (auto b = Current()) b->Reload();
         return true;
     }
     return false;
+}
+
+CefRefPtr<CefClient> Window::DefaultChromeClient() const {
+    return extensions_;
+}
+
+void Window::OpenExtensions() {
+    if (!exiting_ && !extensions_->Open()) {
+        MessageBoxW(hwnd_, L"Не удалось открыть менеджер расширений.", L"Aqua Frame", MB_OK | MB_ICONERROR);
+    }
 }
 
 void Window::Menu() {
@@ -392,6 +412,7 @@ void Window::Menu() {
     AppendMenuW(menu, MF_STRING, 2, L"Восстановить вкладку\tCtrl+Shift+T");
     AppendMenuW(menu, MF_STRING, 3, L"Закрыть вкладку\tCtrl+W");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 5, L"Расширения — перетащить файл\tCtrl+Shift+E");
     AppendMenuW(menu, MF_STRING, 4, L"О браузере Aqua Frame");
     POINT pos{};
     GetCursorPos(&pos);
@@ -401,6 +422,7 @@ void Window::Menu() {
     if (action == 1) AddTab();
     if (action == 2) Shortcut('T', EVENTFLAG_CONTROL_DOWN | EVENTFLAG_SHIFT_DOWN);
     if (action == 3) CloseTab(selected_, false);
+    if (action == 5) OpenExtensions();
     if (action == 4) MessageBoxW(hwnd_, L"Aqua Frame 1.0.0\nAqua Deep Ocean\nBeyond the ordinary.",
                                  L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
 }

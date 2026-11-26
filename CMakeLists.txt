@@ -18,6 +18,7 @@ SET_CEF_TARGET_OUT_DIR()
 add_library(AquaFrame SHARED
   src/browser/main.cpp
   src/chromium/client.cpp
+  src/extensions/manager.cpp
   src/navigation/address.cpp
   src/ui/window.cpp
   src/chromium/pages.cpp)

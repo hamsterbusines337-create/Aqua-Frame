@@ -11,6 +11,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
 public:
     App(HINSTANCE instance, int show) : instance_(instance), show_(show) {}
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+    CefRefPtr<CefClient> GetDefaultClient() override { return window_.DefaultChromeClient(); }
     void OnRegisterCustomSchemes(CefRawPtr<CefSchemeRegistrar> registrar) override {
         aqua::RegisterAquaScheme(registrar);
     }
