@@ -2,6 +2,7 @@
 
 #include "../extensions/manager.h"
 #include "../settings/page.h"
+#include "../scripts/runner.h"
 #include "include/cef_browser.h"
 #include <windows.h>
 #include <cstdint>
@@ -63,6 +64,8 @@ private:
     void ShowLibrary(const wchar_t* section);
     void ToggleBookmark();
     void ToggleFullscreen();
+    void MeasureNavigation();
+    void ShowNavigationTiming(uint64_t tab);
     void RefreshLibrary();
     void ScheduleHistorySave();
     int ContentTop();
@@ -96,6 +99,9 @@ private:
     bool bookmark_bar_ = false;
     WINDOWPLACEMENT windowed_{sizeof(WINDOWPLACEMENT)};
     bool fullscreen_ = false;
+    uint64_t timing_tab_ = 0;
+    CefRefPtr<ScriptRun> timing_run_;
+    std::optional<NavigationTiming> timing_result_;
     UINT font_dpi_ = 0;
     uint64_t next_id_ = 1;
     uint64_t selected_ = 0;

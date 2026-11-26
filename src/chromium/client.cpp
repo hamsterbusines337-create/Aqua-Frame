@@ -96,9 +96,13 @@ void Client::OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>
     window_.TrackDownload(item->GetId(), item->GetSuggestedFileName(), std::move(state));
 }
 
-bool Client::OnPreKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event,
-                           CefEventHandle, bool*) {
-    return !browser->IsPopup() && event.type == KEYEVENT_RAWKEYDOWN &&
+#if CEF_API_ADDED(15800)
+bool Client::OnPreKeyboardEvent(CefRefPtr<CefBrowser> browser, const CefKeyboardInputEvent& event,
+                               const CefInputEventContext&, bool*) {
+#else
+bool Client::OnPreKeyEvent(CefRefPtr<CefBrowser> browser, const CefKeyEvent& event, CefEventHandle, bool*) {
+#endif
+    return !browser->IsPopup() && (event.type == KEYEVENT_RAWKEYDOWN || event.type == KEYEVENT_KEYDOWN) &&
            window_.Shortcut(event.windows_key_code, event.modifiers);
 }
 }

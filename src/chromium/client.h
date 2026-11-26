@@ -7,13 +7,25 @@
 namespace aqua {
 class Window;
 class Client final : public CefClient, public CefDisplayHandler,
-                     public CefLifeSpanHandler, public CefKeyboardHandler, public CefRequestHandler,
+                     public CefLifeSpanHandler, public CefRequestHandler,
+                     #if CEF_API_ADDED(15800)
+                     public CefInputHandler,
+                     #else
+                     public CefKeyboardHandler,
+                     #endif
                      public CefLoadHandler, public CefDownloadHandler {
 public:
     Client(Window& window, uint64_t tab, bool private_tab) : window_(window), tab_(tab), private_tab_(private_tab) {}
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+    #if CEF_API_ADDED(15800)
+    CefRefPtr<CefInputHandler> GetInputHandler() override { return this; }
+    bool OnPreKeyboardEvent(CefRefPtr<CefBrowser>, const CefKeyboardInputEvent&,
+                            const CefInputEventContext&, bool*) override;
+    #else
     CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
+    bool OnPreKeyEvent(CefRefPtr<CefBrowser>, const CefKeyEvent&, CefEventHandle, bool*) override;
+    #endif
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
@@ -33,7 +45,6 @@ public:
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
     void OnTitleChange(CefRefPtr<CefBrowser>, const CefString&) override;
     void OnAddressChange(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString&) override;
-    bool OnPreKeyEvent(CefRefPtr<CefBrowser>, const CefKeyEvent&, CefEventHandle, bool*) override;
 
 private:
     Window& window_;

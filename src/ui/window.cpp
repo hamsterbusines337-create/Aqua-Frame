@@ -22,6 +22,7 @@ constexpr UINT close_browser_window = WM_APP + 1;
 constexpr UINT apply_settings = WM_APP + 2;
 constexpr UINT process_script_action = WM_APP + 3;
 constexpr UINT upgrade_navigation = WM_APP + 4;
+constexpr UINT navigation_timing_ready = WM_APP + 5;
 constexpr UINT_PTR history_timer = 1;
 constexpr size_t library_limit = 128;
 struct Palette {
@@ -119,7 +120,8 @@ LRESULT CALLBACK Window::AddressProcedure(HWND hwnd, UINT msg, WPARAM w, LPARAM 
             return 0;
         }
         const int modifiers = (GetKeyState(VK_CONTROL) < 0 ? EVENTFLAG_CONTROL_DOWN : 0) |
-                              (GetKeyState(VK_SHIFT) < 0 ? EVENTFLAG_SHIFT_DOWN : 0);
+                              (GetKeyState(VK_SHIFT) < 0 ? EVENTFLAG_SHIFT_DOWN : 0) |
+                              ((l & (1L << 30)) ? EVENTFLAG_IS_REPEAT : 0);
         if (self.Shortcut(static_cast<int>(w), modifiers)) return 0;
     }
     if (msg == WM_CHAR && (w == VK_RETURN || w == 12 || w == 20 || w == 23)) return 0;
@@ -128,6 +130,10 @@ LRESULT CALLBACK Window::AddressProcedure(HWND hwnd, UINT msg, WPARAM w, LPARAM 
 
 LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
+    case WM_KEYDOWN:
+        if ((w == VK_F11 || w == VK_F12 || w == VK_ESCAPE) &&
+            Shortcut(static_cast<int>(w), (l & (1L << 30)) ? EVENTFLAG_IS_REPEAT : 0)) return 0;
+        break;
     case WM_TIMER:
         if (w == history_timer) {
             KillTimer(hwnd_, history_timer);
@@ -232,6 +238,9 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     case process_script_action:
         RunScriptAction();
         return 0;
+    case navigation_timing_ready:
+        ShowNavigationTiming(static_cast<uint64_t>(w));
+        return 0;
     case upgrade_navigation: {
         auto request = https_upgrades_.extract(static_cast<uint64_t>(w));
         if (request && !exiting_) {
@@ -245,6 +254,10 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
         return 0;
     case WM_CLOSE:
         if (!exiting_) {
+            if (timing_run_) {
+                timing_run_->Cancel();
+                timing_run_ = nullptr;
+            }
             if (!reset_requested_) SaveSession();
             exiting_ = true;
             extensions_->Close();
@@ -262,8 +275,9 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
         CefQuitMessageLoop();
         return 0;
     default:
-        return DefWindowProcW(hwnd_, msg, w, l);
+        break;
     }
+    return DefWindowProcW(hwnd_, msg, w, l);
 }
 
 int Window::Scale(int value) const {
@@ -453,6 +467,10 @@ bool Window::QueueBrowserClose(uint64_t id) {
 
 void Window::BrowserClosed(uint64_t id) {
     https_upgrades_.erase(id);
+    if (id == timing_tab_ && timing_run_) {
+        timing_run_->Cancel();
+        timing_run_ = nullptr;
+    }
     if (const auto* tab = Find(id); tab && !exiting_ && !tab->private_tab) {
         if (closed_.size() == 32) closed_.erase(closed_.begin());
         closed_.push_back(tab->url);
@@ -552,7 +570,7 @@ void Window::Navigate() {
 
 bool Window::Shortcut(int key, int modifiers) {
     if (key == VK_F11 || (key == VK_ESCAPE && fullscreen_)) {
-        ToggleFullscreen();
+        if (!(modifiers & EVENTFLAG_IS_REPEAT)) ToggleFullscreen();
         return true;
     }
     if (key == VK_F12) {
@@ -602,6 +620,43 @@ bool Window::Shortcut(int key, int modifiers) {
         return true;
     }
     return false;
+}
+
+void Window::MeasureNavigation() {
+    auto browser = Current();
+    if (!browser) return;
+    const auto* tab = Find(selected_);
+    auto url = browser->GetMainFrame()->GetURL().ToString();
+    if (!tab || !IsLibraryUrl(CefString(url).ToWString())) {
+        MessageBoxW(hwnd_, L"Откройте сайт и дождитесь загрузки страницы.", L"Aqua Performance", MB_OK);
+        return;
+    }
+    if (timing_run_) timing_run_->Cancel();
+    timing_tab_ = selected_;
+    timing_run_ = new ScriptRun(browser->GetHost(), std::move(url),
+        [this, id = selected_](std::optional<NavigationTiming> result) {
+            timing_result_ = std::move(result);
+            PostMessageW(hwnd_, navigation_timing_ready, id, 0);
+        });
+    timing_run_->Start();
+}
+
+void Window::ShowNavigationTiming(uint64_t tab) {
+    if (exiting_ || tab != timing_tab_ || !timing_run_) return;
+    timing_run_->Cancel();
+    timing_run_ = nullptr;
+    if (tab != selected_) return;
+    auto timing = std::exchange(timing_result_, std::nullopt);
+    if (!timing) {
+        MessageBoxW(hwnd_, L"Данные загрузки страницы пока недоступны.", L"Aqua Performance", MB_OK);
+        return;
+    }
+    wchar_t report[480]{};
+    swprintf_s(report, L"DNS: %.1f мс\nСоединение: %.1f мс\nTLS: %.1f мс\n"
+        L"Первый байт ответа (TTFB): %.1f мс\nЗагрузка документа: %.1f мс\n\n"
+        L"Показатели последней загрузки документа. При использовании кэша или готового соединения некоторые интервалы равны нулю.",
+        timing->dns, timing->connection, timing->tls, timing->first_byte, timing->document);
+    MessageBoxW(hwnd_, report, L"Aqua Performance", MB_OK | MB_ICONINFORMATION);
 }
 
 int Window::ContentTop() {
@@ -956,6 +1011,7 @@ void Window::Menu() {
     AppendMenuW(menu, MF_STRING, 10, L"Закладки");
     AppendMenuW(menu, MF_STRING, 11, L"Загрузки\tCtrl+J");
     AppendMenuW(menu, MF_STRING, 12, L"Полноэкранный режим\tF11");
+    AppendMenuW(menu, MF_STRING, 13, L"Время соединения и ответа сайта");
     AppendMenuW(menu, MF_STRING, 6, L"Настройки");
     AppendMenuW(menu, MF_STRING, 7, L"Aqua Scripts — импорт JS");
     AppendMenuW(menu, MF_STRING, 5, L"Расширения — перетащить файл\tCtrl+Shift+E");
@@ -976,6 +1032,7 @@ void Window::Menu() {
     if (action == 10) ShowLibrary(L"bookmarks");
     if (action == 11) ShowLibrary(L"downloads");
     if (action == 12) ToggleFullscreen();
+    if (action == 13) MeasureNavigation();
     if (action == 4) MessageBoxW(hwnd_, L"Aqua Frame 1.0.0\nAqua Deep Ocean\nBeyond the ordinary.",
                                  L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
 }
