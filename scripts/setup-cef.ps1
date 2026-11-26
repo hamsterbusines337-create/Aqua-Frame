@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$Version = '158.0.6+g23f1736+chromium-158.0.8127.89',
-    [string]$Sha256
+    [string]$Sha256,
+    [switch]$UsePythonExtractor
 )
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -82,7 +83,11 @@ try {
     if ($Sha256 -and $digest -ne $Sha256) { throw 'CEF archive SHA-256 mismatch.' }
 
     Write-Host 'Extracting CEF.'
-    & tar.exe -xf $archive -C $stage
+    if ($UsePythonExtractor) {
+        & python -c 'import sys, tarfile; a = tarfile.open(sys.argv[1], "r:bz2"); a.extractall(sys.argv[2], filter="data")' $archive $stage
+    } else {
+        & tar.exe -xf $archive -C $stage
+    }
     if ($LASTEXITCODE -ne 0) { throw 'CEF extraction failed.' }
     $extracted = Join-Path $stage ($package.name -replace '\.tar\.bz2$', '')
     if (!(Test-Path (Join-Path $extracted 'Release\libcef.dll'))) { throw 'CEF extraction is incomplete.' }
@@ -93,7 +98,8 @@ try {
         sha1 = $package.sha1
         sha256 = $digest
     } | ConvertTo-Json | Set-Content (Join-Path $extracted '.aqua-package.json') -Encoding ascii
-    Move-Item -LiteralPath $extracted -Destination $destination
+    Write-Host 'Moving extracted CEF into place.'
+    [IO.Directory]::Move($extracted, $destination)
     Write-Host "Prepared CEF $Version, Chromium $chromiumVersion."
 } finally {
     Remove-Item -LiteralPath $stage -Recurse -Force
