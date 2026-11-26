@@ -18,6 +18,7 @@ public static class AquaResetUi {
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
     [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
+    [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window,out Rect rect);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window,out Rect rect);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window,ref Point point);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
@@ -123,6 +124,19 @@ try {
     if ($window -eq $zero) { throw 'The initial Aqua Frame window did not open.' }
     Position $window
     Start-Sleep -Seconds 3
+    $client = New-Object AquaResetUi+Rect
+    if (![AquaResetUi]::GetClientRect($window, [ref]$client)) { throw 'Unable to measure the browser toolbar.' }
+    $dpi = [AquaResetUi]::GetDpiForWindow($window) / 96.0
+    Click-At $window ([int]($client.Right / $dpi) - 61) 56
+    $extensionWindow = Window-For 'Chrome_WidgetWin_1' 'Расширения — Aqua Frame' 10
+    if ($extensionWindow -eq $zero) {
+        # Chromium Views uses a platform-specific widget class. Find the
+        # opened application window by title instead if the class changes.
+        $extensionWindow = [AquaResetUi]::FindWindow([NullString]::Value, 'Расширения — Aqua Frame')
+    }
+    if ($extensionWindow -eq $zero) { throw 'The toolbar extension button did not open the manager.' }
+    [void][AquaResetUi]::PostMessage($extensionWindow, 0x0010, $zero, $zero)
+    Start-Sleep -Seconds 1
     Open-Address $window 'aqua://settings/'
     Screenshot $window 'settings-general-default.png'
     Click-At $window 898 264
