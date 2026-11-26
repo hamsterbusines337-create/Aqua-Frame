@@ -1,0 +1,30 @@
+name: Aqua Frame extension ZIP drop
+on:
+  push:
+    branches: [codex/aqua-screenshot]
+    paths: ['.github/workflows/windows-extension-drop.yml', 'diagnostics/extension-drop.ps1']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  drag:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Download the release build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run watch 45778897340 --repo "${{ github.repository }}" --interval 12 --exit-status
+          if ($LASTEXITCODE -ne 0) { throw 'Windows build failed.' }
+          gh run download 45778897340 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download runtime.' }
+          icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not set sandbox ACLs.' }
+      - name: Drag a Manifest V3 ZIP using Windows OLE
+        shell: powershell
+        run: powershell.exe -NoProfile -STA -File diagnostics/extension-drop.ps1
