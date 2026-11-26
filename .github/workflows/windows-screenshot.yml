@@ -1,0 +1,81 @@
+name: Aqua Frame Windows screenshot
+on:
+  push:
+    branches: [codex/aqua-screenshot]
+permissions:
+  actions: read
+  contents: read
+jobs:
+  screenshot:
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - name: Download the tested Windows build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45770912364 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to download the tested runtime.' }
+          icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
+          if ($LASTEXITCODE -ne 0) { throw 'Unable to set runtime sandbox permissions.' }
+      - name: Capture Aqua Frame window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          Add-Type @'
+          using System;
+          using System.Runtime.InteropServices;
+          public static class Capture {
+              [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+              [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+              [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
+              [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+              [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+          }
+          '@
+          [void][Capture]::SetProcessDPIAware()
+          $process = Start-Process (Join-Path $PWD 'runtime/AquaFrame.exe') -WorkingDirectory (Join-Path $PWD 'runtime') -PassThru
+          try {
+              $deadline = (Get-Date).AddSeconds(35)
+              do {
+                  Start-Sleep -Milliseconds 400
+                  $process.Refresh()
+                  if ($process.HasExited) { throw "Browser exited with $($process.ExitCode)." }
+              } until ($process.MainWindowHandle -or (Get-Date) -gt $deadline)
+              $window = $process.MainWindowHandle
+              if (!$window) { throw 'Aqua Frame window did not appear.' }
+              $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+              $width = [Math]::Min(1120, $screen.Width - 40)
+              $height = [Math]::Min(740, $screen.Height - 40)
+              if (![Capture]::SetWindowPos($window, [IntPtr](-1), $screen.X + 20, $screen.Y + 20, $width, $height, 64)) {
+                  throw 'Unable to position the Aqua Frame window.'
+              }
+              Start-Sleep -Seconds 4
+              $r = New-Object Capture+Rect
+              if (![Capture]::GetWindowRect($window, [ref]$r)) { throw 'Unable to measure the window.' }
+              $size = [Drawing.Size]::new($r.Right - $r.Left, $r.Bottom - $r.Top)
+              $bmp = [Drawing.Bitmap]::new($size.Width, $size.Height)
+              $g = [Drawing.Graphics]::FromImage($bmp)
+              try {
+                  $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $size)
+                  $bmp.Save((Join-Path $PWD 'AquaFrame-Windows.png'), [Drawing.Imaging.ImageFormat]::Png)
+                  $dc = $g.GetHdc()
+                  try { $printed = [Capture]::PrintWindow($window, $dc, 2) }
+                  finally { $g.ReleaseHdc($dc) }
+                  if ($printed) { $bmp.Save((Join-Path $PWD 'AquaFrame-WindowCapture.png'), [Drawing.Imaging.ImageFormat]::Png) }
+              } finally {
+                  $g.Dispose()
+                  $bmp.Dispose()
+              }
+          } finally {
+              if (!$process.HasExited) {
+                  if (!$process.CloseMainWindow() -or !$process.WaitForExit(20000)) { Stop-Process -Id $process.Id -Force }
+              }
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: AquaFrame-Windows-Screenshot
+          path: AquaFrame-*.png
+          if-no-files-found: error
