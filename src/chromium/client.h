@@ -13,7 +13,7 @@ class Client final : public CefClient, public CefDisplayHandler,
                      #else
                      public CefKeyboardHandler,
                      #endif
-                     public CefLoadHandler, public CefDownloadHandler {
+                     public CefLoadHandler, public CefDownloadHandler, public CefPermissionHandler {
 public:
     Client(Window& window, uint64_t tab, bool private_tab) : window_(window), tab_(tab), private_tab_(private_tab) {}
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
@@ -29,6 +29,11 @@ public:
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
     CefRefPtr<CefLoadHandler> GetLoadHandler() override { return this; }
     CefRefPtr<CefDownloadHandler> GetDownloadHandler() override { return this; }
+    CefRefPtr<CefPermissionHandler> GetPermissionHandler() override { return this; }
+    bool OnRequestMediaAccessPermission(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString&,
+                                       uint32_t, CefRefPtr<CefMediaAccessCallback>) override;
+    bool OnShowPermissionPrompt(CefRefPtr<CefBrowser>, uint64_t, const CefString&,
+                                uint32_t, CefRefPtr<CefPermissionPromptCallback>) override;
     bool OnBeforeDownload(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>,
                           const CefString&, CefRefPtr<CefBeforeDownloadCallback>) override;
     void OnDownloadUpdated(CefRefPtr<CefBrowser>, CefRefPtr<CefDownloadItem>,
@@ -45,6 +50,7 @@ public:
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
     void OnTitleChange(CefRefPtr<CefBrowser>, const CefString&) override;
     void OnAddressChange(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString&) override;
+    void OnFullscreenModeChange(CefRefPtr<CefBrowser>, bool fullscreen) override;
 
 private:
     Window& window_;

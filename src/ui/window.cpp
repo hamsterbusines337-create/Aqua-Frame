@@ -7,6 +7,7 @@
 #include "include/cef_frame.h"
 #include "include/cef_app.h"
 #include <algorithm>
+#include <charconv>
 #include <iterator>
 #include <utility>
 #include <commctrl.h>
@@ -23,6 +24,8 @@ constexpr UINT apply_settings = WM_APP + 2;
 constexpr UINT process_script_action = WM_APP + 3;
 constexpr UINT upgrade_navigation = WM_APP + 4;
 constexpr UINT navigation_timing_ready = WM_APP + 5;
+constexpr UINT confirm_site_permission = WM_APP + 6;
+constexpr UINT download_action = WM_APP + 7;
 constexpr UINT_PTR history_timer = 1;
 constexpr size_t library_limit = 128;
 struct Palette {
@@ -176,8 +179,54 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
         return reinterpret_cast<LRESULT>(address_brush_);
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: Paint(); return 0;
+    case WM_CONTEXTMENU: {
+        POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        if (point.x == -1 && point.y == -1) break;
+        const auto screen = point;
+        ScreenToClient(hwnd_, &point);
+        if (const auto id = TabAt(point)) {
+            TabMenu(id, screen);
+            return 0;
+        }
+        break;
+    }
+    case WM_LBUTTONDOWN: {
+        POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        const auto id = TabAt(point);
+        const auto it = std::ranges::find(tabs_, id, &Tab::id);
+        if (it != tabs_.end() && point.x < TabBounds(it - tabs_.begin()).right - Scale(26)) {
+            dragged_tab_ = id;
+            drag_start_ = point;
+            tab_reordered_ = false;
+            SetCapture(hwnd_);
+        }
+        return 0;
+    }
+    case WM_MOUSEMOVE: {
+        POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        if (!dragged_tab_ || !(w & MK_LBUTTON) || std::abs(point.x - drag_start_.x) < Scale(8)) break;
+        const auto source = std::ranges::find(tabs_, dragged_tab_, &Tab::id);
+        const auto target = std::ranges::find(tabs_, TabAt(point), &Tab::id);
+        if (source != tabs_.end() && target != tabs_.end() && source != target &&
+            source->pinned == target->pinned && source->group == target->group) {
+            std::iter_swap(source, target);
+            tab_reordered_ = true;
+            Layout();
+        }
+        return 0;
+    }
+    case WM_CAPTURECHANGED:
+        dragged_tab_ = 0;
+        tab_reordered_ = false;
+        return 0;
     case WM_LBUTTONUP: {
         POINT point{GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        if (dragged_tab_) {
+            const auto dragged = dragged_tab_;
+            const bool reordered = tab_reordered_;
+            ReleaseCapture();
+            if (reordered) { Select(dragged); return 0; }
+        }
         if (point.y < Scale(36)) {
             for (size_t i = 0; i < tabs_.size(); ++i) {
                 const auto r = TabBounds(i);
@@ -241,6 +290,12 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     case navigation_timing_ready:
         ShowNavigationTiming(static_cast<uint64_t>(w));
         return 0;
+    case confirm_site_permission:
+        ConfirmSitePermission();
+        return 0;
+    case download_action:
+        RunDownloadAction(static_cast<uint64_t>(w));
+        return 0;
     case upgrade_navigation: {
         auto request = https_upgrades_.extract(static_cast<uint64_t>(w));
         if (request && !exiting_) {
@@ -260,6 +315,7 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
             }
             if (!reset_requested_) SaveSession();
             exiting_ = true;
+            downloads_.clear();
             extensions_->Close();
 
             std::vector<uint64_t> ids;
@@ -292,6 +348,15 @@ RECT Window::TabBounds(size_t index) const {
                                   static_cast<long>(Scale(44)), static_cast<long>(Scale(190)));
     const long start = Scale(8) + static_cast<long>(index) * width;
     return {start, Scale(4), start + width - Scale(2), Scale(36)};
+}
+
+uint64_t Window::TabAt(POINT point) const {
+    if (fullscreen_ || point.y < 0 || point.y >= Scale(36)) return 0;
+    for (size_t i = 0; i < tabs_.size(); ++i) {
+        const auto bounds = TabBounds(i);
+        if (PtInRect(&bounds, point)) return tabs_[i].id;
+    }
+    return 0;
 }
 
 Window::Tab* Window::Find(uint64_t id) {
@@ -359,11 +424,17 @@ void Window::Paint() {
         RECT tab = TabBounds(i);
         const bool current = tabs_[i].id == selected_;
         Rounded(dc, tab, Scale(8), current ? colors.active : colors.inactive);
+        if (tabs_[i].group) {
+            const auto stripe = tabs_[i].group == 1 ? colors.accent : RGB(166, 113, 240);
+            Fill(dc, {tab.left + Scale(6), tab.bottom - Scale(2), tab.right - Scale(6), tab.bottom}, stripe);
+        }
         RECT title = tab;
         title.left += Scale(10);
         title.right -= Scale(26);
-        const auto title_text = tabs_[i].private_tab ? L"◈  " + tabs_[i].title :
+        auto title_text = tabs_[i].private_tab ? L"◈  " + tabs_[i].title :
             IsSettings(tabs_[i].url) ? L"⚙  " + tabs_[i].title : tabs_[i].title;
+        if (tabs_[i].pinned) title_text.insert(0, L"◆ ");
+        else if (tabs_[i].group) title_text.insert(0, tabs_[i].group == 1 ? L"Работа · " : L"Учёба · ");
         Label(dc, title, title_text, current ? colors.text : colors.muted, DT_END_ELLIPSIS);
         Label(dc, {tab.right - Scale(25), tab.top, tab.right, tab.bottom}, L"×", colors.text, DT_CENTER);
     }
@@ -471,6 +542,10 @@ void Window::BrowserClosed(uint64_t id) {
         timing_run_->Cancel();
         timing_run_ = nullptr;
     }
+    if (id == fullscreen_document_) {
+        fullscreen_document_ = 0;
+        if (!exiting_ && fullscreen_) ToggleFullscreen();
+    }
     if (const auto* tab = Find(id); tab && !exiting_ && !tab->private_tab) {
         if (closed_.size() == 32) closed_.erase(closed_.begin());
         closed_.push_back(tab->url);
@@ -498,7 +573,10 @@ void Window::CloseTab(uint64_t id, bool force) {
 
 void Window::Select(uint64_t id) {
     if (auto old = Current()) {
-        if (selected_ != id) ShowWindow(old->GetHost()->GetWindowHandle(), SW_HIDE);
+        if (selected_ != id) {
+            if (old->GetHost()->IsFullscreen()) old->GetHost()->ExitFullscreen(true);
+            ShowWindow(old->GetHost()->GetWindowHandle(), SW_HIDE);
+        }
     }
     selected_ = id;
     if (auto* tab = Find(id)) {
@@ -555,6 +633,12 @@ void Window::Navigate() {
     }
     auto browser = Current();
     if (!browser) return;
+    if (address == L"aqua://library/history" || address == L"aqua://library/bookmarks" ||
+        address == L"aqua://library/downloads") {
+        if (const auto* tab = Find(selected_); tab && !tab->private_tab)
+            browser->GetMainFrame()->LoadURL(address);
+        return;
+    }
     if (address == L"aqua://settings" || address == L"aqua://settings/" ||
         address.starts_with(L"aqua://settings/#")) {
         browser->GetHost()->SetFocus(true);
@@ -570,7 +654,12 @@ void Window::Navigate() {
 
 bool Window::Shortcut(int key, int modifiers) {
     if (key == VK_F11 || (key == VK_ESCAPE && fullscreen_)) {
-        if (!(modifiers & EVENTFLAG_IS_REPEAT)) ToggleFullscreen();
+        if (!(modifiers & EVENTFLAG_IS_REPEAT)) {
+            const bool owned_by_page = fullscreen_document_ != 0;
+            if (auto browser = Current(); browser && browser->GetHost()->IsFullscreen())
+                browser->GetHost()->ExitFullscreen(true);
+            if (!owned_by_page) ToggleFullscreen();
+        }
         return true;
     }
     if (key == VK_F12) {
@@ -584,8 +673,15 @@ bool Window::Shortcut(int key, int modifiers) {
     }
     if (!(modifiers & EVENTFLAG_CONTROL_DOWN)) return false;
     const bool shift = (modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
+    if (key == VK_TAB && !tabs_.empty()) {
+        const auto active = std::ranges::find(tabs_, selected_, &Tab::id) - tabs_.begin();
+        const auto index = (active + tabs_.size() + (shift ? -1 : 1)) % tabs_.size();
+        Select(tabs_[index].id);
+        return true;
+    }
     if (key == 'H') { ShowLibrary(L"history"); return true; }
     if (key == 'J') { ShowLibrary(L"downloads"); return true; }
+    if (key == 'M' && shift) { MeasureNavigation(); return true; }
     if (key == 'D' && !shift) { ToggleBookmark(); return true; }
     if (key == 'B' && shift) { bookmark_bar_ = !bookmark_bar_; Layout(); return true; }
     if (key == 'N' && shift) { AddTab(L"aqua://newtab/", true); return true; }
@@ -686,6 +782,17 @@ void Window::ToggleFullscreen() {
     if (auto browser = Current()) browser->GetHost()->SetFocus(true);
 }
 
+void Window::DocumentFullscreen(uint64_t id, bool enabled) {
+    if (exiting_) return;
+    if (enabled && id == selected_ && !fullscreen_) {
+        fullscreen_document_ = id;
+        ToggleFullscreen();
+    } else if (!enabled && id == fullscreen_document_) {
+        fullscreen_document_ = 0;
+        if (fullscreen_) ToggleFullscreen();
+    }
+}
+
 void Window::ShowLibrary(const wchar_t* section) {
     if (const auto* tab = Find(selected_); tab && tab->private_tab) return;
     RefreshLibrary();
@@ -693,8 +800,8 @@ void Window::ShowLibrary(const wchar_t* section) {
 }
 
 void Window::RefreshLibrary() {
-    std::vector<std::wstring> states;
-    for (const auto& item : downloads_) states.push_back(item.second);
+    std::vector<DownloadEntry> states;
+    for (const auto& item : downloads_) states.push_back(item.entry);
     UpdateAquaLibrary(preferences_.history, preferences_.bookmarks, states);
 }
 
@@ -735,26 +842,94 @@ void Window::ToggleBookmark() {
     Layout();
 }
 
-void Window::TrackDownload(uint32_t id, const CefString& name, std::wstring state) {
+void Window::TrackDownload(uint32_t id, const CefString& name, std::wstring state, bool paused,
+                           CefRefPtr<CefDownloadItemCallback> callback) {
     if (exiting_) return;
-    const auto item = std::ranges::find_if(downloads_, [id](const auto& row) { return row.first == id; });
+    const auto item = std::ranges::find_if(downloads_, [id](const auto& row) { return row.entry.id == id; });
     auto filename = name.ToWString().substr(0, 260);
     if (filename.empty()) filename = L"Файл";
     auto label = filename + L" — " + state;
     if (item != downloads_.end()) {
-        if (item->second == label) return;
-        item->second = std::move(label);
+        const bool active = callback != nullptr;
+        item->callback = std::move(callback);
+        if (item->entry.label == label && item->entry.paused == paused && item->entry.active == active) return;
+        item->entry = {id, std::move(label), active, paused};
     } else {
-        downloads_.insert(downloads_.begin(), {id, std::move(label)});
+        downloads_.insert(downloads_.begin(), {{id, std::move(label), callback != nullptr, paused}, std::move(callback)});
         if (downloads_.size() > 64) downloads_.pop_back();
     }
     RefreshLibrary();
+}
+
+void Window::QueueDownloadAction(uint64_t tab, std::string_view url) {
+    constexpr std::string_view prefix = "aqua://library/action/";
+    const auto route = url.substr(prefix.size());
+    const auto delimiter = route.find('/');
+    if (delimiter == std::string_view::npos || download_action_) return;
+    const auto id_text = route.substr(delimiter + 1);
+    uint32_t id = 0;
+    const auto parsed = std::from_chars(id_text.data(), id_text.data() + id_text.size(), id);
+    if (parsed.ec != std::errc{} || parsed.ptr != id_text.data() + id_text.size()) return;
+    const auto operation = route.substr(0, delimiter);
+    if (operation != "pause" && operation != "resume" && operation != "cancel") return;
+    download_action_.emplace(id, operation);
+    if (!PostMessageW(hwnd_, download_action, tab, 0)) download_action_.reset();
+}
+
+void Window::RunDownloadAction(uint64_t id) {
+    const auto action = std::exchange(download_action_, std::nullopt);
+    const auto* tab = Find(id);
+    if (!action || exiting_ || id != selected_ || !tab || tab->closing || tab->private_tab ||
+        tab->url != L"aqua://library/downloads") return;
+    const auto item = std::ranges::find_if(downloads_, [&](const auto& row) { return row.entry.id == action->first; });
+    if (item == downloads_.end() || !item->callback) return;
+    const auto callback = item->callback;
+    if (action->second == "pause" && !item->entry.paused) callback->Pause();
+    else if (action->second == "resume" && item->entry.paused) callback->Resume();
+    else if (action->second == "cancel") callback->Cancel();
 }
 
 void Window::UpgradeNavigation(uint64_t tab, const std::string& url) {
     if (exiting_) return;
     https_upgrades_.insert_or_assign(tab, CefString("https://" + url.substr(7)).ToWString());
     PostMessageW(hwnd_, upgrade_navigation, tab, 0);
+}
+
+void Window::RequestSitePermission(uint64_t id, const CefString& address, std::wstring names,
+                                   std::function<void(bool)> done) {
+    auto origin = WebOrigin(address.ToString());
+    auto* tab = Find(id);
+    if (exiting_ || permission_ || permission_open_ || id != selected_ || !tab || tab->closing ||
+        !origin.starts_with("https://") || origin != WebOrigin(CefString(tab->url).ToString())) {
+        done(false);
+        return;
+    }
+    permission_.emplace(SitePermission{id, std::move(origin), std::move(names), std::move(done)});
+    if (!PostMessageW(hwnd_, confirm_site_permission, 0, 0)) {
+        auto request = std::exchange(permission_, std::nullopt);
+        request->done(false);
+    }
+}
+
+void Window::ConfirmSitePermission() {
+    auto request = std::exchange(permission_, std::nullopt);
+    if (!request) return;
+    const auto still_current = [&] {
+        const auto* tab = Find(request->tab);
+        return !exiting_ && tab && !tab->closing && tab->id == selected_ &&
+            request->origin == WebOrigin(CefString(tab->url).ToString());
+    };
+    if (!still_current()) {
+        request->done(false);
+        return;
+    }
+    const auto message = L"Разрешить доступ сайту " + CefString(request->origin).ToWString() +
+        L"?\n\n" + request->names;
+    permission_open_ = true;
+    const auto answer = MessageBoxW(hwnd_, message.c_str(), L"Разрешение сайта Aqua Frame",
+                                    MB_YESNO | MB_DEFBUTTON2 | MB_ICONQUESTION);
+    permission_open_ = false;
+    request->done(answer == IDYES && still_current());
 }
 
 CefRefPtr<CefClient> Window::DefaultChromeClient() const {
@@ -1011,7 +1186,7 @@ void Window::Menu() {
     AppendMenuW(menu, MF_STRING, 10, L"Закладки");
     AppendMenuW(menu, MF_STRING, 11, L"Загрузки\tCtrl+J");
     AppendMenuW(menu, MF_STRING, 12, L"Полноэкранный режим\tF11");
-    AppendMenuW(menu, MF_STRING, 13, L"Время соединения и ответа сайта");
+    AppendMenuW(menu, MF_STRING, 13, L"Время соединения и ответа сайта\tCtrl+Shift+M");
     AppendMenuW(menu, MF_STRING, 6, L"Настройки");
     AppendMenuW(menu, MF_STRING, 7, L"Aqua Scripts — импорт JS");
     AppendMenuW(menu, MF_STRING, 5, L"Расширения — перетащить файл\tCtrl+Shift+E");
@@ -1035,5 +1210,37 @@ void Window::Menu() {
     if (action == 13) MeasureNavigation();
     if (action == 4) MessageBoxW(hwnd_, L"Aqua Frame 1.0.0\nAqua Deep Ocean\nBeyond the ordinary.",
                                  L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
+}
+
+void Window::TabMenu(uint64_t id, POINT position) {
+    const auto* tab = Find(id);
+    if (!tab || tab->closing) return;
+    const auto menu = CreatePopupMenu();
+    AppendMenuW(menu, MF_STRING, 1, L"Дублировать вкладку");
+    AppendMenuW(menu, MF_STRING, 2, tab->pinned ? L"Открепить вкладку" : L"Закрепить вкладку");
+    AppendMenuW(menu, MF_STRING, 3, L"Добавить в группу «Работа»");
+    AppendMenuW(menu, MF_STRING, 4, L"Добавить в группу «Учёба»");
+    AppendMenuW(menu, MF_STRING | (tab->group ? 0 : MF_GRAYED), 5, L"Убрать из группы");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 6, L"Закрыть вкладку");
+    const auto action = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY, position.x, position.y,
+                                       0, hwnd_, nullptr);
+    DestroyMenu(menu);
+    auto* target = Find(id);
+    if (!target || target->closing || !action) return;
+    if (action == 1) { AddTab(target->url, target->private_tab); return; }
+    if (action == 6) { CloseTab(id, false); return; }
+    if (action == 2) {
+        target->pinned = !target->pinned;
+        if (target->pinned) target->group = 0;
+    } else {
+        target->pinned = false;
+        target->group = action == 5 ? 0 : action - 2;
+    }
+    std::stable_sort(tabs_.begin(), tabs_.end(), [](const Tab& a, const Tab& b) {
+        const auto key = [](const Tab& tab) { return tab.pinned ? 0U : tab.group ? tab.group : 3U; };
+        return key(a) < key(b);
+    });
+    Layout();
 }
 }

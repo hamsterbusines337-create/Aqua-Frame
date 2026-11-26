@@ -6,6 +6,7 @@
 #include "include/wrapper/cef_stream_resource_handler.h"
 #include "include/wrapper/cef_byte_read_handler.h"
 
+#include <algorithm>
 #include <mutex>
 
 namespace aqua {
@@ -17,10 +18,9 @@ constexpr char home[] = R"HTML(<!doctype html>
 <title>Новая вкладка</title>
 <style>
 :root{color-scheme:dark;background:#0b1628;color:#e6f1ff;font:16px 'Segoe UI',sans-serif}
-body{margin:0;min-height:100vh;display:grid;place-items:center;background:
-radial-gradient(ellipse 90% 60% at -10% 72%,#123254 0%,#0a1b2c 57%,transparent 58%),
-radial-gradient(ellipse 78% 54% at 108% 94%,#103155 15%,#09213b 61%,transparent 62%),#0b1628}
-main{text-align:center;width:min(580px,90vw);padding:24px}
+body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b1628}
+.waves{position:fixed;inset:0;width:100%;height:100%;pointer-events:none}
+main{position:relative;text-align:center;width:min(580px,88vw);padding:24px}
 .brand{width:76px;height:76px}h1{margin:3px 0 22px;font-size:27px}
 form{display:flex;align-items:center;overflow:hidden;border:1px solid #2b3d52;border-radius:28px;background:#14243a;padding:0 12px}
 input{font:inherit;color:#e6f1ff;outline:none;background:transparent;border:0;padding:14px 10px;width:100%}
@@ -33,8 +33,25 @@ a .shortcut{transition:transform 135ms ease,border-color 135ms ease,background-c
 a:hover .shortcut{transform:translateY(-2px)}
 a:hover .shortcut,a:focus-visible .shortcut{border-color:#7dd3fc;background:#203b59}
 @media(prefers-reduced-motion:reduce){.shortcut{transition:none!important;transform:none!important}}
-p{color:#8ca0b3;font-size:13px;margin:22px 0 0}.google{color:#7dd3fc;font-weight:700}
+.recent{margin-top:30px;text-align:left}.recent h2{font-size:13px;font-weight:600;color:#8ca0b3}
+.recent ul{list-style:none;display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;padding:0}
+.recent a{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:#14243a;border:1px solid #2b3d52;border-radius:8px;padding:8px 10px}
+.recent a:hover,.recent a:focus-visible{border-color:#7dd3fc}
+.google{color:#7dd3fc;font-weight:700}
 </style>
+<svg class="waves" viewBox="0 0 1440 680" preserveAspectRatio="none" aria-hidden="true">
+  <defs>
+    <linearGradient id="ocean-a" x2="0" y2="1" gradientUnits="objectBoundingBox">
+      <stop stop-color="#102f51"/><stop offset="1" stop-color="#0b192c"/>
+    </linearGradient>
+    <linearGradient id="ocean-b" x2="1" y2="0" gradientUnits="objectBoundingBox">
+      <stop stop-color="#0b182a"/><stop offset="1" stop-color="#103659"/>
+    </linearGradient>
+  </defs>
+  <path d="M0 190C240 292 383 299 546 328C747 364 786 497 1440 451V680H0Z" fill="url(#ocean-a)"/>
+  <path d="M0 439C325 340 435 362 657 445C936 548 1080 585 1440 338V680H0Z" fill="url(#ocean-b)"/>
+  <path d="M0 610C346 570 511 645 739 625C992 600 1193 590 1440 491V680H0Z" fill="#0a1c33"/>
+</svg>
 <main>
 <svg class="brand" viewBox="0 0 80 80" aria-hidden="true"><defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="#7dd3fc"/><stop offset="1" stop-color="#0089c4"/></linearGradient></defs><path fill="url(#a)" d="M36 8h10l29 61H60L40 25l-9 21 14 2 6 12-25-3-6 12H5z"/><path fill="#00b8e6" d="m36 8 4 17 6-17z"/></svg>
 <h1>Aqua Frame</h1>
@@ -83,7 +100,7 @@ std::mutex page_mutex;
 Preferences page_preferences;
 std::vector<Script> page_scripts;
 std::vector<PageEntry> page_history, page_bookmarks;
-std::vector<std::wstring> page_downloads;
+std::vector<DownloadEntry> page_downloads;
 
 class PageBytes final : public CefBaseRefCounted {
 public:
@@ -95,6 +112,7 @@ private:
 
 class Pages final : public CefSchemeHandlerFactory {
 public:
+    explicit Pages(bool private_session) : private_session_(private_session) {}
     CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
         const CefString&, CefRefPtr<CefRequest> request) override {
         if (request->GetMethod() != "GET") return nullptr;
@@ -105,11 +123,14 @@ public:
             SearchEngine engine;
             Theme theme;
             bool animations;
+            std::vector<PageEntry> recent;
             {
                 const std::scoped_lock lock(page_mutex);
                 engine = page_preferences.search;
                 theme = page_preferences.theme;
                 animations = page_preferences.animations;
+                if (!private_session_)
+                    recent.assign(page_history.begin(), page_history.begin() + std::min(size_t{4}, page_history.size()));
             }
             page = home;
             if (!animations) page.insert(page.find("</style>"), ".shortcut{transition:none!important;transform:none!important}");
@@ -117,7 +138,7 @@ public:
                 const auto style_end = page.find("</style>");
                 page.insert(style_end,
                     ":root{background:#07101c;color:#fff}"
-                    "body{background:#07101c}"
+                    "body{background:#07101c}.waves{display:none}"
                     "form,nav a .shortcut{background:#12243a;border-color:#6687a7}");
             }
             const std::string_view endpoint = "https://www.google.com/search";
@@ -134,6 +155,15 @@ public:
                 const auto badge = page.find(">G</span>");
                 if (badge != std::string::npos)
                     page[badge + 1] = SearchName(engine).front();
+            }
+            if (!recent.empty()) {
+                std::string list = "<section class=\"recent\"><h2>Недавно посещённые</h2><ul>";
+                for (const auto& entry : recent) {
+                    const auto href = HtmlEscape(CefString(entry.url).ToString());
+                    list += "<li><a href=\"" + href + "\">" +
+                        HtmlEscape(CefString(entry.title.empty() ? entry.url : entry.title).ToString()) + "</a></li>";
+                }
+                page.insert(page.find("</main>"), list + "</ul></section>");
             }
         } else if (url == "aqua://settings/" || url.starts_with("aqua://settings/#")) {
             const std::scoped_lock lock(page_mutex);
@@ -163,6 +193,7 @@ public:
                                             CefStreamReader::CreateForHandler(reader));
     }
 private:
+    const bool private_session_;
     IMPLEMENT_REFCOUNTING(Pages);
 };
 
@@ -174,7 +205,7 @@ void RegisterAquaScheme(CefRawPtr<CefSchemeRegistrar> registrar) {
 }
 
 bool RegisterAquaPages(CefRefPtr<CefRequestContext> context) {
-    auto pages = CefRefPtr<Pages>(new Pages());
+    auto pages = CefRefPtr<Pages>(new Pages(context != nullptr));
     if (context) return context->RegisterSchemeHandlerFactory("aqua", "newtab", pages);
     return CefRegisterSchemeHandlerFactory("aqua", "newtab", pages) &&
            CefRegisterSchemeHandlerFactory("aqua", "library", pages) &&
@@ -194,7 +225,7 @@ void UpdateAquaPageSettings(const Preferences& settings) {
     page_preferences.https_only = settings.https_only;
 }
 void UpdateAquaLibrary(const std::vector<PageEntry>& history, const std::vector<PageEntry>& bookmarks,
-                       const std::vector<std::wstring>& downloads) {
+                       const std::vector<DownloadEntry>& downloads) {
     const std::scoped_lock lock(page_mutex);
     page_history = history;
     page_bookmarks = bookmarks;

@@ -21,9 +21,14 @@ public:
     std::vector<Script> ScriptsFor(std::string_view url) const;
     void AddTab(const std::wstring& url = L"aqua://newtab/", bool private_tab = false, bool deferred = false);
     void RecordVisit(uint64_t tab, const CefString& url, int status);
-    void TrackDownload(uint32_t id, const CefString& name, std::wstring state);
+    void TrackDownload(uint32_t id, const CefString& name, std::wstring state, bool paused = false,
+                       CefRefPtr<CefDownloadItemCallback> callback = nullptr);
+    void QueueDownloadAction(uint64_t tab, std::string_view url);
+    void DocumentFullscreen(uint64_t tab, bool enabled);
     bool HttpsOnly() const { return preferences_.https_only; }
     void UpgradeNavigation(uint64_t tab, const std::string& url);
+    void RequestSitePermission(uint64_t tab, const CefString& origin, std::wstring names,
+                               std::function<void(bool)> done);
     void BrowserCreated(uint64_t tab, CefRefPtr<CefBrowser> browser);
     bool QueueBrowserClose(uint64_t tab);
     void BrowserClosed(uint64_t tab);
@@ -41,6 +46,8 @@ private:
         bool closing = false;
         bool private_tab = false;
         bool deferred = false;
+        bool pinned = false;
+        unsigned group = 0;
     };
 
     static LRESULT CALLBACK Procedure(HWND, UINT, WPARAM, LPARAM);
@@ -53,6 +60,8 @@ private:
     void Select(uint64_t id);
     void Navigate();
     void Menu();
+    void TabMenu(uint64_t id, POINT position);
+    uint64_t TabAt(POINT point) const;
     void OpenExtensions();
     void OpenScriptManager();
     void RunScriptAction();
@@ -67,7 +76,9 @@ private:
     void MeasureNavigation();
     void ShowNavigationTiming(uint64_t tab);
     void RefreshLibrary();
+    void RunDownloadAction(uint64_t tab);
     void ScheduleHistorySave();
+    void ConfirmSitePermission();
     int ContentTop();
     void ApplyZoom(const CefRefPtr<CefBrowser>& browser, std::wstring_view url);
     RECT TabBounds(size_t index) const;
@@ -93,12 +104,29 @@ private:
     std::string last_web_origin_;
     std::vector<Tab> tabs_;
     std::vector<std::wstring> closed_;
-    std::vector<std::pair<uint32_t, std::wstring>> downloads_;
+    struct Download {
+        DownloadEntry entry;
+        CefRefPtr<CefDownloadItemCallback> callback;
+    };
+    std::vector<Download> downloads_;
+    std::optional<std::pair<uint32_t, std::string>> download_action_;
     std::map<uint64_t, std::wstring> https_upgrades_;
+    struct SitePermission {
+        uint64_t tab;
+        std::string origin;
+        std::wstring names;
+        std::function<void(bool)> done;
+    };
+    std::optional<SitePermission> permission_;
+    bool permission_open_ = false;
     bool history_dirty_ = false;
     bool bookmark_bar_ = false;
     WINDOWPLACEMENT windowed_{sizeof(WINDOWPLACEMENT)};
     bool fullscreen_ = false;
+    uint64_t fullscreen_document_ = 0;
+    uint64_t dragged_tab_ = 0;
+    POINT drag_start_{};
+    bool tab_reordered_ = false;
     uint64_t timing_tab_ = 0;
     CefRefPtr<ScriptRun> timing_run_;
     std::optional<NavigationTiming> timing_result_;

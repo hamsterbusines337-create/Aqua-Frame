@@ -27,7 +27,7 @@ bool IsLibraryUrl(std::wstring_view url) {
 }
 
 std::string RenderLibrary(const std::vector<PageEntry>& history, const std::vector<PageEntry>& bookmarks,
-                          const std::vector<std::wstring>& downloads, std::string_view url) {
+                          const std::vector<DownloadEntry>& downloads, std::string_view url) {
     const bool show_bookmarks = url == "aqua://library/bookmarks";
     const bool show_downloads = url == "aqua://library/downloads";
     std::string page = R"HTML(<!doctype html><html lang="ru"><meta charset="utf-8">
@@ -42,8 +42,16 @@ summary,small,p{color:#8ca0b3}small{display:block;margin-top:3px}
 </style><nav><a href="/history">История</a><a href="/bookmarks">Закладки</a><a href="/downloads">Загрузки</a></nav><main>)HTML";
     if (show_downloads) {
         page += "<h1>Загрузки</h1><p>Текущая сессия · <a href=\"/downloads\">Обновить список</a></p><ul>";
-        for (const auto& status : downloads)
-            page += "<li class=\"download\">" + HtmlEscape(CefString(status).ToString()) + "</li>";
+        for (const auto& entry : downloads) {
+            page += "<li class=\"download\">" + HtmlEscape(CefString(entry.label).ToString());
+            if (entry.active) {
+                const auto id = std::to_string(entry.id);
+                page += entry.paused ? " · <a href=\"/action/resume/" + id + "\">Продолжить</a>" :
+                                       " · <a href=\"/action/pause/" + id + "\">Пауза</a>";
+                page += " · <a href=\"/action/cancel/" + id + "\">Отменить</a>";
+            }
+            page += "</li>";
+        }
         if (downloads.empty()) page += "<li>Загрузок пока нет.</li>";
     } else {
         page += show_bookmarks ? "<h1>Закладки</h1><p>Ctrl+D добавляет или убирает текущую страницу.</p><ul>" :

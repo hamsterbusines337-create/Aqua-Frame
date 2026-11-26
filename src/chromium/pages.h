@@ -10,5 +10,5 @@ bool RegisterAquaPages(CefRefPtr<CefRequestContext> context = nullptr);
 void UpdateAquaPageSettings(const Preferences& settings);
 void UpdateAquaScriptList(const std::vector<Script>& scripts);
 void UpdateAquaLibrary(const std::vector<PageEntry>& history, const std::vector<PageEntry>& bookmarks,
-                       const std::vector<std::wstring>& downloads);
+                       const std::vector<DownloadEntry>& downloads);
 }
