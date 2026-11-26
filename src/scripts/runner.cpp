@@ -51,7 +51,7 @@ void ScriptRun::OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id,
     if (stage_ == Stage::frame_tree) {
         auto tree = data->GetDictionary("frameTree");
         auto frame = tree ? tree->GetDictionary("frame") : nullptr;
-        if (!frame || frame->GetString("url").ToString() != url_) {
+        if (!frame || frame->GetString("url").ToString() != url_.substr(0, url_.find('#'))) {
             stage_ = Stage::finished;
             return;
         }
