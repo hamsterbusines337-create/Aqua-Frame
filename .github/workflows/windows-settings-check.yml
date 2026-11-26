@@ -1,0 +1,38 @@
+name: Aqua Frame settings and factory reset
+on:
+  push:
+    branches: [codex/aqua-screenshot]
+    paths: ['.github/workflows/windows-settings-check.yml', 'diagnostics/settings-reset.ps1']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  check:
+    runs-on: windows-2022
+    timeout-minutes: 14
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Download tested build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run watch 45823869524 --repo "${{ github.repository }}" --interval 12 --exit-status
+          if ($LASTEXITCODE -ne 0) { throw 'The Windows build failed.' }
+          gh run download 45823869524 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download runtime.' }
+          icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not set sandbox ACLs.' }
+      - name: Test cancellation and complete profile reset from settings
+        shell: pwsh
+        run: ./diagnostics/settings-reset.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: AquaFrame-Settings-Screens
+          path: |
+            settings-*.png
+            reset-confirm-*.png
+          if-no-files-found: ignore
