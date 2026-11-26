@@ -26,7 +26,8 @@ function Get-ChromeReport([IntPtr]$window) {
     for ($attempt = 0; $attempt -lt 5; $attempt++) {
         [Windows.Forms.Clipboard]::Clear()
         Click-At $window 475 175
-        [Windows.Forms.SendKeys]::SendWait('^a^c')
+        [Windows.Forms.SendKeys]::SendWait('^a')
+        [Windows.Forms.SendKeys]::SendWait('^c')
         Start-Sleep -Milliseconds 350
         $value = [Windows.Forms.Clipboard]::GetText()
         if ($value.Length -gt 50) { return $value }
@@ -83,7 +84,7 @@ try {
     if ($report -notmatch '(?i)graphics feature status' -or $report -notmatch '(?i)compositing') {
         throw "The real Chromium GPU report was not available. Captured characters: $($report.Length)."
     }
-    Write-Host (($report -split '`r?`n' | Where-Object { $_ -match '(?i)^\s*(Compositing|Rasterization|OpenGL|WebGL)\b' } | Select-Object -First 8) -join "`n")
+    Write-Host (($report -split '\r?\n' | Where-Object { $_ -match '(?i)^\s*(Compositing|Rasterization|OpenGL|WebGL)\b' } | Select-Object -First 8) -join "`n")
     Close-Aqua $window
 } finally {
     if ($process -and !$process.HasExited) {
