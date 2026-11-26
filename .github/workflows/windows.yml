@@ -15,7 +15,8 @@ jobs:
         with:
           persist-credentials: false
       - name: Prepare official CEF binaries
-        shell: powershell
+        timeout-minutes: 8
+        shell: pwsh
         run: ./scripts/setup-cef.ps1
       - name: Build Release
         shell: cmd
