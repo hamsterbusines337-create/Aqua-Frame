@@ -12,6 +12,7 @@ public:
     bool Create(HINSTANCE instance, int show);
     void AddTab(const std::wstring& url = L"aqua://newtab/");
     void BrowserCreated(uint64_t tab, CefRefPtr<CefBrowser> browser);
+    bool QueueBrowserClose(uint64_t tab);
     void BrowserClosed(uint64_t tab);
     void AddressChanged(uint64_t tab, const CefString& address);
     void TitleChanged(uint64_t tab, const CefString& title);

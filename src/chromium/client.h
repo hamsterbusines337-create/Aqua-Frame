@@ -17,6 +17,7 @@ public:
         const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
         CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override;
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
+    bool DoClose(CefRefPtr<CefBrowser> browser) override;
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
     void OnTitleChange(CefRefPtr<CefBrowser>, const CefString&) override;
     void OnAddressChange(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, const CefString&) override;

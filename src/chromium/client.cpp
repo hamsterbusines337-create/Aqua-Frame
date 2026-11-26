@@ -17,6 +17,10 @@ void Client::OnAfterCreated(CefRefPtr<CefBrowser> browser) {
     if (!browser->IsPopup()) window_.BrowserCreated(tab_, browser);
 }
 
+bool Client::DoClose(CefRefPtr<CefBrowser> browser) {
+    return !browser->IsPopup() && window_.QueueBrowserClose(tab_);
+}
+
 void Client::OnBeforeClose(CefRefPtr<CefBrowser> browser) {
     if (!browser->IsPopup()) window_.BrowserClosed(tab_);
 }

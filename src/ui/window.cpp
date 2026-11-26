@@ -10,6 +10,7 @@
 
 namespace aqua {
 namespace {
+constexpr UINT close_browser_window = WM_APP + 1;
 constexpr COLORREF background = RGB(11, 22, 40);
 constexpr COLORREF toolbar = RGB(20, 36, 58);
 constexpr COLORREF active = RGB(32, 59, 89);
@@ -149,6 +150,12 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     case WM_SETFOCUS:
         if (edit_) SetFocus(edit_);
         return 0;
+    case close_browser_window:
+        if (auto* tab = Find(static_cast<uint64_t>(w)); tab && tab->browser) {
+            const auto child = tab->browser->GetHost()->GetWindowHandle();
+            if (child && IsChild(hwnd_, child)) DestroyWindow(child);
+        }
+        return 0;
     case WM_CLOSE:
         if (tabs_.empty()) {
             DestroyWindow(hwnd_);
@@ -279,6 +286,12 @@ void Window::BrowserCreated(uint64_t id, CefRefPtr<CefBrowser> browser) {
     Layout();
 }
 
+bool Window::QueueBrowserClose(uint64_t id) {
+    // CEF's default notification targets the shared top-level window. Close
+    // only this tab's child HWND, after the DoClose callback has returned.
+    return PostMessageW(hwnd_, close_browser_window, static_cast<WPARAM>(id), 0) != FALSE;
+}
+
 void Window::BrowserClosed(uint64_t id) {
     if (const auto* tab = Find(id); tab && !exiting_) {
         if (closed_.size() == 32) closed_.erase(closed_.begin());
@@ -286,7 +299,7 @@ void Window::BrowserClosed(uint64_t id) {
     }
     std::erase_if(tabs_, [id](const Tab& tab) { return tab.id == id; });
     if (tabs_.empty()) {
-        DestroyWindow(hwnd_);
+        PostMessageW(hwnd_, WM_CLOSE, 0, 0);
         return;
     }
     if (selected_ == id && !exiting_) Select(tabs_.back().id);
