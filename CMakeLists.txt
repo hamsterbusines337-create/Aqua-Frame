@@ -22,6 +22,7 @@ add_library(AquaFrame SHARED
   src/browser/main.cpp
   src/chromium/client.cpp
   src/extensions/manager.cpp
+  src/library/library.cpp
   src/navigation/address.cpp
   src/profiles/profile.cpp
   src/reset/restart.cpp

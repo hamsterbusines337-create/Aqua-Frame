@@ -29,7 +29,10 @@ nav{display:flex;justify-content:center;flex-wrap:wrap;gap:14px;margin:23px auto
 a{display:grid;gap:7px;color:#e6f1ff;text-decoration:none;min-width:74px;font-size:13px}
 .shortcut{display:grid;place-items:center;height:47px;background:#14243a;border:1px solid #2b3d52;border-radius:8px}
 .shortcut svg{display:block;width:24px;height:24px}
+a .shortcut{transition:transform 135ms ease,border-color 135ms ease,background-color 135ms ease}
+a:hover .shortcut{transform:translateY(-2px)}
 a:hover .shortcut,a:focus-visible .shortcut{border-color:#7dd3fc;background:#203b59}
+@media(prefers-reduced-motion:reduce){.shortcut{transition:none!important;transform:none!important}}
 p{color:#8ca0b3;font-size:13px;margin:22px 0 0}.google{color:#7dd3fc;font-weight:700}
 </style>
 <main>
@@ -79,6 +82,8 @@ a{color:#7dd3fc}
 std::mutex page_mutex;
 Preferences page_preferences;
 std::vector<Script> page_scripts;
+std::vector<PageEntry> page_history, page_bookmarks;
+std::vector<std::wstring> page_downloads;
 
 class PageBytes final : public CefBaseRefCounted {
 public:
@@ -99,12 +104,15 @@ public:
         if (url == "aqua://newtab/") {
             SearchEngine engine;
             Theme theme;
+            bool animations;
             {
                 const std::scoped_lock lock(page_mutex);
                 engine = page_preferences.search;
                 theme = page_preferences.theme;
+                animations = page_preferences.animations;
             }
             page = home;
+            if (!animations) page.insert(page.find("</style>"), ".shortcut{transition:none!important;transform:none!important}");
             if (theme == Theme::contrast) {
                 const auto style_end = page.find("</style>");
                 page.insert(style_end,
@@ -132,6 +140,10 @@ public:
             page = RenderSettings(page_preferences, page_scripts);
         } else if (url == "aqua://welcome/") {
             page = welcome;
+        } else if (url == "aqua://library/history" || url == "aqua://library/bookmarks" ||
+                   url == "aqua://library/downloads") {
+            const std::scoped_lock lock(page_mutex);
+            page = RenderLibrary(page_history, page_bookmarks, page_downloads, url);
         } else {
             return nullptr;
         }
@@ -161,9 +173,11 @@ void RegisterAquaScheme(CefRawPtr<CefSchemeRegistrar> registrar) {
         CEF_SCHEME_OPTION_SECURE | CEF_SCHEME_OPTION_DISPLAY_ISOLATED);
 }
 
-bool RegisterAquaPages() {
+bool RegisterAquaPages(CefRefPtr<CefRequestContext> context) {
     auto pages = CefRefPtr<Pages>(new Pages());
+    if (context) return context->RegisterSchemeHandlerFactory("aqua", "newtab", pages);
     return CefRegisterSchemeHandlerFactory("aqua", "newtab", pages) &&
+           CefRegisterSchemeHandlerFactory("aqua", "library", pages) &&
            CefRegisterSchemeHandlerFactory("aqua", "settings", pages) &&
            CefRegisterSchemeHandlerFactory("aqua", "welcome", pages);
 }
@@ -176,6 +190,15 @@ void UpdateAquaPageSettings(const Preferences& settings) {
     page_preferences.limit_restored_tabs = settings.limit_restored_tabs;
     page_preferences.restore_session = settings.restore_session;
     page_preferences.zoom = settings.zoom;
+    page_preferences.animations = settings.animations;
+    page_preferences.https_only = settings.https_only;
+}
+void UpdateAquaLibrary(const std::vector<PageEntry>& history, const std::vector<PageEntry>& bookmarks,
+                       const std::vector<std::wstring>& downloads) {
+    const std::scoped_lock lock(page_mutex);
+    page_history = history;
+    page_bookmarks = bookmarks;
+    page_downloads = downloads;
 }
 void UpdateAquaScriptList(const std::vector<Script>& scripts) {
     const std::scoped_lock lock(page_mutex);

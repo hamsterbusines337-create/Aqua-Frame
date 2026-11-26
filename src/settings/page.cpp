@@ -20,6 +20,9 @@ constexpr std::array actions{
     std::pair{"theme-ocean", Action::theme_ocean}, std::pair{"theme-contrast", Action::theme_contrast},
     std::pair{"limit-restore-on", Action::limit_restore_on}, std::pair{"limit-restore-off", Action::limit_restore_off},
     std::pair{"downloads", Action::open_downloads},
+    std::pair{"clear-history", Action::clear_history},
+    std::pair{"animations-on", Action::animations_on}, std::pair{"animations-off", Action::animations_off},
+    std::pair{"https-on", Action::https_on}, std::pair{"https-off", Action::https_off},
     std::pair{"defaults", Action::reset_preferences}, std::pair{"factory", Action::factory_reset}
 };
 
@@ -44,20 +47,6 @@ constexpr std::array sections{
     Section{"updates", "Обновления", "M20 8a8 8 0 0 0-14-3L3 8m0-5v5h5m-4 8a8 8 0 0 0 14 3l3-3m0 5v-5h-5"},
     Section{"about", "О браузере", "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 8v6m0-10v1"}
 };
-
-std::string Escape(std::string_view text) {
-    std::string output;
-    for (const auto ch : text) {
-        switch (ch) {
-        case '&': output += "&amp;"; break;
-        case '<': output += "&lt;"; break;
-        case '>': output += "&gt;"; break;
-        case '"': output += "&quot;"; break;
-        default: output += ch; break;
-        }
-    }
-    return output;
-}
 
 constexpr auto css = R"HTML(
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -181,6 +170,7 @@ std::string RenderSettings(const Preferences& settings, const std::vector<Script
     html += Dropdown(std::to_string(settings.zoom) + "%", {
         {"zoom-90", "90%"}, {"zoom-100", "100%"}, {"zoom-110", "110%"}, {"zoom-125", "125%"}
     });
+    html += Switch("Короткие анимации главной страницы", "animations-on", "animations-off", settings.animations);
     html += R"HTML(</div></section>
 <section id="performance"><h2>Производительность</h2><div class="card"><h3>Восстановление вкладок</h3>
 <p>При восстановлении сессии можно ограничить число вкладок, загружаемых при запуске.</p>)HTML";
@@ -194,23 +184,30 @@ std::string RenderSettings(const Preferences& settings, const std::vector<Script
     html += "</div>";
     if (scripts.empty()) html += "<div class=\"card\"><p>Скриптов пока нет.</p></div>";
     for (const auto& script : scripts) {
-        html += "<div class=\"card\"><h3>" + Escape(script.name) + "</h3><p>" +
-            Escape(script.origin) + (script.enabled ? " · Включён" : " · Выключен") + "</p>";
+        html += "<div class=\"card\"><h3>" + HtmlEscape(script.name) + "</h3><p>" +
+            HtmlEscape(script.origin) + (script.enabled ? " · Включён" : " · Выключен") + "</p>";
         html += Link((script.enabled ? "script-disable/" : "script-enable/") + script.id,
                      script.enabled ? "Выключить" : "Включить");
         html += " ";
         html += Link("script-remove/" + script.id, "Удалить");
         html += "</div>";
     }
-    html += R"HTML(</section><section id="security"><h2>Безопасность</h2><div class="card"><h3>Chromium Sandbox</h3><p>Aqua Frame запускается с включённой песочницей Chromium и использует проверку сертификатов Chromium.</p></div></section>
-<section id="privacy"><h2>Конфиденциальность</h2><div class="card"><h3>Локальные данные</h3><p>Полный сброс удаляет локальный профиль после подтверждения.</p><a class="button" href="#reset">Открыть сброс браузера</a></div></section>
+    html += R"HTML(</section><section id="security"><h2>Безопасность</h2><div class="card"><h3>Chromium Sandbox</h3><p>Aqua Frame запускается с включённой песочницей Chromium и использует проверку сертификатов Chromium.</p>)HTML";
+    html += Switch("HTTPS-Only для переходов в основной вкладке", "https-on", "https-off", settings.https_only);
+    html += R"HTML(<p>В этом режиме Aqua Frame открывает защищённую версию HTTP-адреса и блокирует переходы обратно на HTTP.</p></div></section>
+<section id="privacy"><h2>Конфиденциальность</h2><div class="card"><h3>Локальные данные</h3><p>Ctrl+Shift+N открывает вкладку инкогнито с отдельными временными cookies и хранилищем.</p><a class="button" href="#reset">Открыть сброс браузера</a> )HTML";
+    html += Link("clear-history", "Очистить историю", "class=\"button destructive\"");
+    html += R"HTML(</div></section>
 <section id="search"><h2>Поисковая система</h2><div class="card"><h3>Поиск по умолчанию</h3><p>Используется в адресной строке и на стартовой странице.</p>)HTML";
     html += SearchDropdown(settings);
     html += R"HTML(</div></section><section id="downloads"><h2>Загрузки</h2><div class="card">)HTML";
     html += Link("downloads", "Открыть папку загрузок Windows");
+    html += R"HTML( <a class="button" href="aqua://library/downloads">Открыть список загрузок</a>)HTML";
     html += R"HTML(</div></section><section id="shortcuts"><h2>Горячие клавиши</h2><div class="card">
 <p><kbd>Ctrl+L</kbd> Адресная строка · <kbd>Ctrl+T</kbd> Новая вкладка · <kbd>Ctrl+W</kbd> Закрыть вкладку</p>
 <p><kbd>Ctrl+Shift+T</kbd> Восстановить вкладку · <kbd>Ctrl+Shift+E</kbd> Расширения</p>
+<p><kbd>Ctrl+H</kbd> История · <kbd>Ctrl+J</kbd> Загрузки · <kbd>Ctrl+D</kbd> Закладка · <kbd>Ctrl+Shift+B</kbd> Панель закладок</p>
+<p><kbd>Ctrl+Shift+N</kbd> Инкогнито · <kbd>F11</kbd> Полный экран · <kbd>F12</kbd> Инструменты разработчика</p>
 </div></section><section id="reset"><h2>Сброс браузера</h2><div class="card">
 <h3>Обычный сброс</h3><p>Возвращает стандартные настройки. Данные сайтов сохраняются.</p>
 )HTML";

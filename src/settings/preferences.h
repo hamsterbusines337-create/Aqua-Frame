@@ -1,5 +1,6 @@
 #pragma once
 
+#include "../library/library.h"
 #include <filesystem>
 #include <string_view>
 #include <vector>
@@ -17,6 +18,10 @@ struct Preferences {
     bool limit_restored_tabs = false;
     int zoom = 100;
     std::vector<std::wstring> session;
+    std::vector<PageEntry> history;
+    std::vector<PageEntry> bookmarks;
+    bool animations = true;
+    bool https_only = false;
 };
 
 std::string_view SearchName(SearchEngine engine);

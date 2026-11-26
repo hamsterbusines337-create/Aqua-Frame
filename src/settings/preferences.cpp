@@ -10,6 +10,31 @@ namespace aqua {
 namespace {
 constexpr auto file_name = L"aqua-settings.json";
 constexpr size_t max_size = 4 * 1024 * 1024;
+constexpr size_t max_entries = 128;
+
+std::vector<PageEntry> ReadEntries(CefRefPtr<CefDictionaryValue> dictionary, const char* key) {
+    std::vector<PageEntry> entries;
+    auto list = dictionary->GetList(key);
+    if (!list) return entries;
+    for (size_t i = 0; i < list->GetSize() && entries.size() < max_entries; ++i) {
+        auto item = list->GetDictionary(i);
+        if (!item) continue;
+        auto url = item->GetString("url").ToWString();
+        if (IsLibraryUrl(url)) entries.push_back({std::move(url), item->GetString("title").ToWString().substr(0, 160)});
+    }
+    return entries;
+}
+
+CefRefPtr<CefListValue> WriteEntries(const std::vector<PageEntry>& entries) {
+    auto list = CefListValue::Create();
+    for (const auto& entry : entries) {
+        auto item = CefDictionaryValue::Create();
+        item->SetString("url", entry.url);
+        item->SetString("title", entry.title);
+        list->SetDictionary(list->GetSize(), item);
+    }
+    return list;
+}
 }
 
 std::string_view SearchName(SearchEngine engine) {
@@ -54,6 +79,10 @@ Preferences ReadPreferences(const std::filesystem::path& profile) {
     if (dictionary->GetString("theme") == "contrast") result.theme = Theme::contrast;
     result.restore_session = dictionary->GetBool("restore_session");
     result.limit_restored_tabs = dictionary->GetBool("limit_restored_tabs");
+    result.animations = !dictionary->HasKey("animations") || dictionary->GetBool("animations");
+    result.https_only = dictionary->GetBool("https_only");
+    result.history = ReadEntries(dictionary, "history");
+    result.bookmarks = ReadEntries(dictionary, "bookmarks");
     const int zoom = dictionary->GetInt("zoom");
     if (zoom == 90 || zoom == 100 || zoom == 110 || zoom == 125) result.zoom = zoom;
 
@@ -77,6 +106,10 @@ bool WritePreferences(const std::filesystem::path& profile, const Preferences& p
     dictionary->SetBool("restore_session", preferences.restore_session);
     dictionary->SetBool("limit_restored_tabs", preferences.limit_restored_tabs);
     dictionary->SetInt("zoom", preferences.zoom);
+    dictionary->SetBool("animations", preferences.animations);
+    dictionary->SetBool("https_only", preferences.https_only);
+    dictionary->SetList("history", WriteEntries(preferences.history));
+    dictionary->SetList("bookmarks", WriteEntries(preferences.bookmarks));
     auto session = CefListValue::Create();
     if (preferences.restore_session) {
         for (const auto& url : preferences.session) {

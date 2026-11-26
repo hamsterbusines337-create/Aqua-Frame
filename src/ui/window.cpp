@@ -8,6 +8,7 @@
 #include "include/cef_app.h"
 #include <algorithm>
 #include <iterator>
+#include <utility>
 #include <commctrl.h>
 #include <commdlg.h>
 #include <dwmapi.h>
@@ -20,6 +21,9 @@ namespace {
 constexpr UINT close_browser_window = WM_APP + 1;
 constexpr UINT apply_settings = WM_APP + 2;
 constexpr UINT process_script_action = WM_APP + 3;
+constexpr UINT upgrade_navigation = WM_APP + 4;
+constexpr UINT_PTR history_timer = 1;
+constexpr size_t library_limit = 128;
 struct Palette {
     COLORREF background, toolbar, active, inactive, text, muted, accent, border;
 };
@@ -60,6 +64,7 @@ bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& p
     scripts_.Load(profile_);
     UpdateAquaScriptList(scripts_.Items());
     UpdateAquaPageSettings(preferences_);
+    RefreshLibrary();
     WNDCLASSW wc{};
     wc.hInstance = instance;
     wc.lpfnWndProc = Procedure;
@@ -88,7 +93,7 @@ bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& p
     } else if (preferences_.restore_session) {
         const auto count = preferences_.session.size();
         const auto first = preferences_.limit_restored_tabs && count > 8 ? count - 8 : 0;
-        for (auto i = first; i < count; ++i) AddTab(preferences_.session[i]);
+        for (auto i = first; i < count; ++i) AddTab(preferences_.session[i], false, i + 1 < count);
     }
     if (tabs_.empty()) AddTab(preferences_.startup_page == StartupPage::settings
         ? L"aqua://settings/" : L"aqua://newtab/");
@@ -123,6 +128,12 @@ LRESULT CALLBACK Window::AddressProcedure(HWND hwnd, UINT msg, WPARAM w, LPARAM 
 
 LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
+    case WM_TIMER:
+        if (w == history_timer) {
+            KillTimer(hwnd_, history_timer);
+            if (history_dirty_ && WritePreferences(profile_, preferences_)) history_dirty_ = false;
+        }
+        return 0;
     case WM_CREATE:
         dpi_ = GetDpiForWindow(hwnd_);
         address_brush_ = CreateSolidBrush(Colors(preferences_.theme).background);
@@ -176,10 +187,16 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
             GetClientRect(hwnd_, &r);
             if (point.x >= r.right - Scale(44)) Menu();
             else if (point.x >= r.right - Scale(78)) OpenExtensions();
+            else if (point.x >= r.right - Scale(106)) ToggleBookmark();
             else if (auto b = Current()) {
                 if (point.x < Scale(38)) b->GoBack();
                 else if (point.x < Scale(70)) b->GoForward();
                 else if (point.x < Scale(102)) b->Reload();
+            }
+        } else if (point.y < ContentTop() && point.x >= Scale(8)) {
+            const auto index = static_cast<size_t>((point.x - Scale(8)) / Scale(132));
+            if (index < preferences_.bookmarks.size() && index < 8) {
+                if (auto browser = Current()) browser->GetMainFrame()->LoadURL(preferences_.bookmarks[index].url);
             }
         }
         return 0;
@@ -215,6 +232,14 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     case process_script_action:
         RunScriptAction();
         return 0;
+    case upgrade_navigation: {
+        auto request = https_upgrades_.extract(static_cast<uint64_t>(w));
+        if (request && !exiting_) {
+            if (const auto* tab = Find(request.key()); tab && tab->browser && !tab->closing)
+                tab->browser->GetMainFrame()->LoadURL(request.mapped());
+        }
+        return 0;
+    }
     case apply_settings:
         ApplySettingsAction(static_cast<uint64_t>(w), static_cast<SettingsAction>(l));
         return 0;
@@ -231,6 +256,7 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
         if (tabs_.empty() && !extensions_->HasBrowsers()) DestroyWindow(hwnd_);
         return 0;
     case WM_DESTROY:
+        KillTimer(hwnd_, history_timer);
         if (font_) DeleteObject(font_);
         if (address_brush_) DeleteObject(address_brush_);
         CefQuitMessageLoop();
@@ -268,20 +294,27 @@ void Window::Layout() {
     if (!edit_) return;
     RECT r{};
     GetClientRect(hwnd_, &r);
-    const auto new_font = CreateFontW(-Scale(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
-        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-    SendMessageW(edit_, WM_SETFONT, reinterpret_cast<WPARAM>(new_font), FALSE);
-    if (font_) DeleteObject(font_);
-    font_ = new_font;
+    if (dpi_ != font_dpi_) {
+        const auto new_font = CreateFontW(-Scale(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+            DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        if (new_font) {
+            SendMessageW(edit_, WM_SETFONT, reinterpret_cast<WPARAM>(new_font), FALSE);
+            if (font_) DeleteObject(font_);
+            font_ = new_font;
+            font_dpi_ = dpi_;
+        }
+    }
     const auto* tab = Find(selected_);
     const int address_left = Scale(tab && IsSettings(tab->url) ? 236 : 112);
-    MoveWindow(edit_, address_left, Scale(47), std::max(0L, r.right - address_left - Scale(92)), Scale(22), TRUE);
+    ShowWindow(edit_, fullscreen_ ? SW_HIDE : SW_SHOWNA);
+    MoveWindow(edit_, address_left, Scale(47), std::max(0L, r.right - address_left - Scale(118)), Scale(22), TRUE);
+    const int top = ContentTop();
     if (auto browser = Current()) {
         if (const auto child = browser->GetHost()->GetWindowHandle())
-            MoveWindow(child, 0, Scale(76), r.right, std::max(0L, r.bottom - Scale(76)), TRUE);
+            MoveWindow(child, 0, top, r.right, std::max(0L, r.bottom - top), TRUE);
     }
-    RECT top{0, 0, r.right, Scale(76)};
-    InvalidateRect(hwnd_, &top, FALSE);
+    RECT chrome{0, 0, r.right, Scale(108)};
+    InvalidateRect(hwnd_, &chrome, FALSE);
 }
 
 void Window::Paint() {
@@ -292,13 +325,17 @@ void Window::Paint() {
     RECT r{};
     GetClientRect(hwnd_, &r);
     Fill(dc, ps.rcPaint, colors.background);
+    if (fullscreen_) {
+        EndPaint(hwnd_, &ps);
+        return;
+    }
     SetBkMode(dc, TRANSPARENT);
     const auto old_font = SelectObject(dc, font_);
     const auto old_brush = SelectObject(dc, GetStockObject(DC_BRUSH));
     const auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
     Fill(dc, {0, Scale(36), r.right, Scale(76)}, colors.toolbar);
-    Rounded(dc, {Scale(101), Scale(42), r.right - Scale(81), Scale(71)}, Scale(8), colors.border);
-    Rounded(dc, {Scale(102), Scale(43), r.right - Scale(82), Scale(70)}, Scale(8), colors.background);
+    Rounded(dc, {Scale(101), Scale(42), r.right - Scale(109), Scale(71)}, Scale(8), colors.border);
+    Rounded(dc, {Scale(102), Scale(43), r.right - Scale(110), Scale(70)}, Scale(8), colors.background);
     if (selected && IsSettings(selected->url)) {
         Label(dc, {Scale(113), Scale(43), Scale(130), Scale(70)}, L"A", colors.accent, DT_CENTER);
         Label(dc, {Scale(135), Scale(43), Scale(222), Scale(70)}, L"Aqua Frame", colors.text, DT_END_ELLIPSIS);
@@ -311,7 +348,8 @@ void Window::Paint() {
         RECT title = tab;
         title.left += Scale(10);
         title.right -= Scale(26);
-        const auto title_text = IsSettings(tabs_[i].url) ? L"⚙  " + tabs_[i].title : tabs_[i].title;
+        const auto title_text = tabs_[i].private_tab ? L"◈  " + tabs_[i].title :
+            IsSettings(tabs_[i].url) ? L"⚙  " + tabs_[i].title : tabs_[i].title;
         Label(dc, title, title_text, current ? colors.text : colors.muted, DT_END_ELLIPSIS);
         Label(dc, {tab.right - Scale(25), tab.top, tab.right, tab.bottom}, L"×", colors.text, DT_CENTER);
     }
@@ -338,30 +376,57 @@ void Window::Paint() {
         DeleteObject(icon_pen);
     }
     Label(dc, {r.right - Scale(44), Scale(36), r.right, Scale(76)}, L"☰", colors.text, DT_CENTER);
+    const bool bookmarked = selected && !selected->private_tab &&
+        std::ranges::find(preferences_.bookmarks, selected->url, &PageEntry::url) != preferences_.bookmarks.end();
+    Label(dc, {r.right - Scale(106), Scale(36), r.right - Scale(78), Scale(76)},
+          bookmarked ? L"★" : L"☆", bookmarked ? colors.accent : colors.text, DT_CENTER);
+    if (ContentTop() > Scale(76)) {
+        Fill(dc, {0, Scale(76), r.right, Scale(108)}, colors.background);
+        for (size_t i = 0; i < preferences_.bookmarks.size() && i < 8; ++i) {
+            const auto x = Scale(8 + static_cast<int>(i) * 132);
+            if (x >= r.right) break;
+            const auto& entry = preferences_.bookmarks[i];
+            Label(dc, {x, Scale(76), std::min(r.right, long(x + Scale(124))), Scale(108)},
+                  entry.title.empty() ? entry.url : entry.title, colors.text, DT_END_ELLIPSIS);
+        }
+        if (preferences_.bookmarks.empty())
+            Label(dc, {Scale(8), Scale(76), r.right, Scale(108)}, L"Ctrl+D — добавить закладку", colors.muted, DT_END_ELLIPSIS);
+    }
     SelectObject(dc, old_pen);
     SelectObject(dc, old_brush);
     SelectObject(dc, old_font);
     EndPaint(hwnd_, &ps);
 }
 
-void Window::AddTab(const std::wstring& url) {
+void Window::AddTab(const std::wstring& url, bool private_tab, bool deferred) {
+    if (exiting_ || tabs_.size() >= 64) return;
+    if (private_tab && !private_context_) {
+        CefRequestContextSettings isolated;
+        auto context = CefRequestContext::CreateContext(isolated, nullptr);
+        if (!context || !RegisterAquaPages(context)) return;
+        private_context_ = std::move(context);
+    }
+    const auto id = next_id_++;
+    const auto title = deferred && url != L"aqua://newtab/" ? url :
+        std::wstring(private_tab ? L"Инкогнито" : L"Новая вкладка");
+    tabs_.push_back({id, title, url, nullptr, false, private_tab, true});
+    if (!deferred) Select(id);
+}
+
+bool Window::StartTab(Tab& tab) {
     RECT r{};
     GetClientRect(hwnd_, &r);
-    if (exiting_ || tabs_.size() >= 64) return;
-    const auto previous = selected_;
-    const auto id = next_id_++;
-    tabs_.push_back({id, L"Новая вкладка", url, nullptr});
-    Select(id);
     CefWindowInfo info;
-    info.SetAsChild(hwnd_, CefRect(0, Scale(76), r.right, std::max(0L, r.bottom - Scale(76))));
+    const auto top = ContentTop();
+    info.SetAsChild(hwnd_, CefRect(0, top, r.right, std::max(0L, r.bottom - top)));
     info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
     CefBrowserSettings settings;
     const auto bg = Colors(preferences_.theme).background;
     settings.background_color = CefColorSetARGB(255, GetRValue(bg), GetGValue(bg), GetBValue(bg));
-    if (!CefBrowserHost::CreateBrowser(info, new Client(*this, id), url, settings, nullptr, nullptr)) {
-        tabs_.pop_back();
-        Select(previous);
-    }
+    if (!CefBrowserHost::CreateBrowser(info, new Client(*this, tab.id, tab.private_tab), tab.url, settings,
+                                       nullptr, tab.private_tab ? private_context_ : nullptr)) return false;
+    tab.deferred = false;
+    return true;
 }
 
 void Window::BrowserCreated(uint64_t id, CefRefPtr<CefBrowser> browser) {
@@ -387,11 +452,13 @@ bool Window::QueueBrowserClose(uint64_t id) {
 }
 
 void Window::BrowserClosed(uint64_t id) {
-    if (const auto* tab = Find(id); tab && !exiting_) {
+    https_upgrades_.erase(id);
+    if (const auto* tab = Find(id); tab && !exiting_ && !tab->private_tab) {
         if (closed_.size() == 32) closed_.erase(closed_.begin());
         closed_.push_back(tab->url);
     }
     std::erase_if(tabs_, [id](const Tab& tab) { return tab.id == id; });
+    if (private_context_ && std::ranges::none_of(tabs_, &Tab::private_tab)) private_context_ = nullptr;
     if (tabs_.empty()) {
         PostMessageW(hwnd_, WM_CLOSE, 0, 0);
         return;
@@ -403,6 +470,10 @@ void Window::BrowserClosed(uint64_t id) {
 void Window::CloseTab(uint64_t id, bool force) {
     auto* tab = Find(id);
     if (!tab) return;
+    if (tab->deferred) {
+        BrowserClosed(id);
+        return;
+    }
     tab->closing = force || !tab->browser;
     if (tab->browser) tab->browser->GetHost()->CloseBrowser(force);
 }
@@ -413,8 +484,12 @@ void Window::Select(uint64_t id) {
     }
     selected_ = id;
     if (auto* tab = Find(id)) {
+        if (tab->deferred && !StartTab(*tab)) {
+            BrowserClosed(id);
+            return;
+        }
         const auto origin = WebOrigin(CefString(tab->url).ToString());
-        if (!origin.empty()) last_web_origin_ = origin;
+        if (!tab->private_tab && !origin.empty()) last_web_origin_ = origin;
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
         if (tab->browser) ShowWindow(tab->browser->GetHost()->GetWindowHandle(), SW_SHOWNA);
     }
@@ -428,12 +503,18 @@ void Window::AddressChanged(uint64_t id, const CefString& address) {
     tab->url = address.ToWString();
     if (id == selected_) {
         const auto origin = WebOrigin(address.ToString());
-        if (!origin.empty()) last_web_origin_ = origin;
+        if (!tab->private_tab && !origin.empty()) last_web_origin_ = origin;
         if (was_settings != IsSettings(tab->url)) Layout();
     }
     if (tab->browser) ApplyZoom(tab->browser, tab->url);
     if (id == selected_ && GetFocus() != edit_)
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
+    if (id == selected_) {
+        RECT r{};
+        GetClientRect(hwnd_, &r);
+        r.bottom = Scale(76);
+        InvalidateRect(hwnd_, &r, FALSE);
+    }
 }
 
 void Window::TitleChanged(uint64_t id, const CefString& title) {
@@ -470,7 +551,26 @@ void Window::Navigate() {
 }
 
 bool Window::Shortcut(int key, int modifiers) {
+    if (key == VK_F11 || (key == VK_ESCAPE && fullscreen_)) {
+        ToggleFullscreen();
+        return true;
+    }
+    if (key == VK_F12) {
+        if (auto browser = Current()) {
+            CefWindowInfo info;
+            info.SetAsPopup(hwnd_, L"Инструменты разработчика Aqua Frame");
+            CefBrowserSettings settings;
+            browser->GetHost()->ShowDevTools(info, nullptr, settings, CefPoint());
+        }
+        return true;
+    }
     if (!(modifiers & EVENTFLAG_CONTROL_DOWN)) return false;
+    const bool shift = (modifiers & EVENTFLAG_SHIFT_DOWN) != 0;
+    if (key == 'H') { ShowLibrary(L"history"); return true; }
+    if (key == 'J') { ShowLibrary(L"downloads"); return true; }
+    if (key == 'D' && !shift) { ToggleBookmark(); return true; }
+    if (key == 'B' && shift) { bookmark_bar_ = !bookmark_bar_; Layout(); return true; }
+    if (key == 'N' && shift) { AddTab(L"aqua://newtab/", true); return true; }
     if (key == 'L') {
         SetFocus(edit_);
         SendMessageW(edit_, EM_SETSEL, 0, -1);
@@ -484,7 +584,8 @@ bool Window::Shortcut(int key, int modifiers) {
                 AddTab(url);
             }
         } else {
-            AddTab();
+            const auto* tab = Find(selected_);
+            AddTab(L"aqua://newtab/", tab && tab->private_tab);
         }
         return true;
     }
@@ -503,6 +604,104 @@ bool Window::Shortcut(int key, int modifiers) {
     return false;
 }
 
+int Window::ContentTop() {
+    if (fullscreen_) return 0;
+    const auto* tab = Find(selected_);
+    return Scale(bookmark_bar_ && tab && !tab->private_tab ? 108 : 76);
+}
+
+void Window::ToggleFullscreen() {
+    if (!fullscreen_) {
+        MONITORINFO monitor{sizeof(MONITORINFO)};
+        if (!GetWindowPlacement(hwnd_, &windowed_) ||
+            !GetMonitorInfoW(MonitorFromWindow(hwnd_, MONITOR_DEFAULTTONEAREST), &monitor)) return;
+        fullscreen_ = true;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, WS_POPUP | WS_CLIPCHILDREN | WS_VISIBLE);
+        const auto& box = monitor.rcMonitor;
+        SetWindowPos(hwnd_, HWND_TOP, box.left, box.top, box.right - box.left,
+                     box.bottom - box.top, SWP_FRAMECHANGED);
+    } else {
+        fullscreen_ = false;
+        SetWindowLongPtrW(hwnd_, GWL_STYLE, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN | WS_VISIBLE);
+        SetWindowPlacement(hwnd_, &windowed_);
+        SetWindowPos(hwnd_, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
+    }
+    Layout();
+    if (auto browser = Current()) browser->GetHost()->SetFocus(true);
+}
+
+void Window::ShowLibrary(const wchar_t* section) {
+    if (const auto* tab = Find(selected_); tab && tab->private_tab) return;
+    RefreshLibrary();
+    AddTab(std::wstring(L"aqua://library/") + section);
+}
+
+void Window::RefreshLibrary() {
+    std::vector<std::wstring> states;
+    for (const auto& item : downloads_) states.push_back(item.second);
+    UpdateAquaLibrary(preferences_.history, preferences_.bookmarks, states);
+}
+
+void Window::ScheduleHistorySave() {
+    if (!history_dirty_) SetTimer(hwnd_, history_timer, 3500, nullptr);
+    history_dirty_ = true;
+}
+
+void Window::RecordVisit(uint64_t id, const CefString& address, int) {
+    const auto* tab = Find(id);
+    const auto url = address.ToWString();
+    if (!tab || tab->private_tab || exiting_ || !IsLibraryUrl(url)) return;
+    auto& history = preferences_.history;
+    std::erase_if(history, [&](const PageEntry& item) { return item.url == url; });
+    history.insert(history.begin(), {url, tab->title});
+    if (history.size() > library_limit) history.pop_back();
+    RefreshLibrary();
+    ScheduleHistorySave();
+}
+
+void Window::ToggleBookmark() {
+    const auto* tab = Find(selected_);
+    if (!tab || tab->private_tab || !IsLibraryUrl(tab->url)) return;
+    auto next = preferences_;
+    if (!std::erase_if(next.bookmarks, [&](const PageEntry& item) { return item.url == tab->url; })) {
+        if (next.bookmarks.size() >= library_limit) {
+            MessageBoxW(hwnd_, L"Достигнут лимит закладок.", L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
+            return;
+        }
+        next.bookmarks.insert(next.bookmarks.begin(), {tab->url, tab->title});
+    }
+    if (!WritePreferences(profile_, next)) {
+        MessageBoxW(hwnd_, L"Не удалось сохранить закладки.", L"Aqua Frame", MB_OK | MB_ICONERROR);
+        return;
+    }
+    preferences_ = std::move(next);
+    RefreshLibrary();
+    Layout();
+}
+
+void Window::TrackDownload(uint32_t id, const CefString& name, std::wstring state) {
+    if (exiting_) return;
+    const auto item = std::ranges::find_if(downloads_, [id](const auto& row) { return row.first == id; });
+    auto filename = name.ToWString().substr(0, 260);
+    if (filename.empty()) filename = L"Файл";
+    auto label = filename + L" — " + state;
+    if (item != downloads_.end()) {
+        if (item->second == label) return;
+        item->second = std::move(label);
+    } else {
+        downloads_.insert(downloads_.begin(), {id, std::move(label)});
+        if (downloads_.size() > 64) downloads_.pop_back();
+    }
+    RefreshLibrary();
+}
+
+void Window::UpgradeNavigation(uint64_t tab, const std::string& url) {
+    if (exiting_) return;
+    https_upgrades_.insert_or_assign(tab, CefString("https://" + url.substr(7)).ToWString());
+    PostMessageW(hwnd_, upgrade_navigation, tab, 0);
+}
+
 CefRefPtr<CefClient> Window::DefaultChromeClient() const {
     return extensions_;
 }
@@ -515,6 +714,7 @@ void Window::OpenExtensions() {
 
 void Window::OpenScriptManager() {
     if (exiting_) return;
+    if (const auto* tab = Find(selected_); tab && tab->private_tab) return;
     for (const auto& tab : tabs_) {
         if (!tab.closing && tab.url == L"aqua://settings/#scripts") {
             Select(tab.id);
@@ -583,6 +783,7 @@ void Window::PickScriptFile() {
 }
 
 void Window::ImportScript(const std::filesystem::path& path) {
+    if (const auto* tab = Find(selected_); tab && tab->private_tab) return;
     const auto origin = last_web_origin_;
     if (origin.empty()) {
         MessageBoxW(hwnd_, L"Сначала откройте сайт, которому хотите разрешить скрипт.",
@@ -640,10 +841,11 @@ void Window::ApplyZoom(const CefRefPtr<CefBrowser>& browser, std::wstring_view u
 }
 
 void Window::SaveSession() {
-    if (!preferences_.restore_session) return;
+    if (!preferences_.restore_session && !history_dirty_) return;
     preferences_.session.clear();
     for (const auto& tab : tabs_) {
-        if (!tab.closing && !tab.url.empty() && IsSessionAddress(tab.url))
+        if (preferences_.restore_session && !tab.closing && !tab.private_tab &&
+            !tab.url.empty() && IsSessionAddress(tab.url))
             preferences_.session.push_back(tab.url);
     }
     if (!WritePreferences(profile_, preferences_))
@@ -701,7 +903,22 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
     case SettingsAction::theme_contrast: next.theme = Theme::contrast; break;
     case SettingsAction::limit_restore_on: next.limit_restored_tabs = true; break;
     case SettingsAction::limit_restore_off: next.limit_restored_tabs = false; break;
-    case SettingsAction::reset_preferences: next = Preferences{}; break;
+    case SettingsAction::animations_on: next.animations = true; break;
+    case SettingsAction::animations_off: next.animations = false; break;
+    case SettingsAction::https_on: next.https_only = true; break;
+    case SettingsAction::https_off: next.https_only = false; break;
+    case SettingsAction::clear_history:
+        if (MessageBoxW(hwnd_, L"Удалить историю посещений Aqua Frame?", L"Очистить историю",
+                        MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES) return;
+        next.history.clear();
+        break;
+    case SettingsAction::reset_preferences: {
+        auto defaults = Preferences{};
+        defaults.history = std::move(next.history);
+        defaults.bookmarks = std::move(next.bookmarks);
+        next = std::move(defaults);
+        break;
+    }
     default: return;
     }
     if (!WritePreferences(profile_, next)) {
@@ -710,6 +927,7 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
     }
     const bool theme_changed = next.theme != preferences_.theme;
     preferences_ = std::move(next);
+    RefreshLibrary();
     if (theme_changed) {
         const auto brush = CreateSolidBrush(Colors(preferences_.theme).background);
         if (brush) {
@@ -732,7 +950,12 @@ void Window::Menu() {
     AppendMenuW(menu, MF_STRING, 1, L"Новая вкладка\tCtrl+T");
     AppendMenuW(menu, MF_STRING, 2, L"Восстановить вкладку\tCtrl+Shift+T");
     AppendMenuW(menu, MF_STRING, 3, L"Закрыть вкладку\tCtrl+W");
+    AppendMenuW(menu, MF_STRING, 8, L"Новая вкладка инкогнито\tCtrl+Shift+N");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 9, L"История\tCtrl+H");
+    AppendMenuW(menu, MF_STRING, 10, L"Закладки");
+    AppendMenuW(menu, MF_STRING, 11, L"Загрузки\tCtrl+J");
+    AppendMenuW(menu, MF_STRING, 12, L"Полноэкранный режим\tF11");
     AppendMenuW(menu, MF_STRING, 6, L"Настройки");
     AppendMenuW(menu, MF_STRING, 7, L"Aqua Scripts — импорт JS");
     AppendMenuW(menu, MF_STRING, 5, L"Расширения — перетащить файл\tCtrl+Shift+E");
@@ -748,6 +971,11 @@ void Window::Menu() {
     if (action == 5) OpenExtensions();
     if (action == 6) AddTab(L"aqua://settings/");
     if (action == 7) OpenScriptManager();
+    if (action == 8) AddTab(L"aqua://newtab/", true);
+    if (action == 9) ShowLibrary(L"history");
+    if (action == 10) ShowLibrary(L"bookmarks");
+    if (action == 11) ShowLibrary(L"downloads");
+    if (action == 12) ToggleFullscreen();
     if (action == 4) MessageBoxW(hwnd_, L"Aqua Frame 1.0.0\nAqua Deep Ocean\nBeyond the ordinary.",
                                  L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
 }
