@@ -53,7 +53,7 @@ public:
             {"X-Content-Type-Options", "nosniff"},
             {"Content-Security-Policy", "frame-ancestors 'none'"}};
         auto stream = CefStreamReader::CreateForData(const_cast<char*>(home), sizeof(home) - 1);
-        return new CefStreamResourceHandler(200, "OK", "text/html; charset=utf-8", headers, stream);
+        return new CefStreamResourceHandler(200, "OK", "text/html", headers, stream);
     }
 private:
     IMPLEMENT_REFCOUNTING(Pages);
