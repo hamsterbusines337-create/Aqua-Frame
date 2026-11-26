@@ -346,8 +346,6 @@ void Window::TitleChanged(uint64_t id, const CefString& title) {
 }
 
 void Window::Navigate() {
-    auto browser = Current();
-    if (!browser) return;
     const int length = GetWindowTextLengthW(edit_);
     std::wstring address(static_cast<size_t>(length) + 1, L'\0');
     address.resize(GetWindowTextW(edit_, address.data(), length + 1));
@@ -355,6 +353,8 @@ void Window::Navigate() {
         OpenExtensions();
         return;
     }
+    auto browser = Current();
+    if (!browser) return;
     const auto url = ResolveAddress(address);
     if (url.empty()) return;
     SetWindowTextW(edit_, url.c_str());

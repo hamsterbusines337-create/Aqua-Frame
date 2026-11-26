@@ -53,12 +53,14 @@ try {
             Where-Object CommandLine -match '(?:^|\s)--type=renderer(?:\s|$)'
     } while ((!$process.MainWindowHandle -or !$renderer) -and (Get-Date) -lt $deadline)
     if (!$process.MainWindowHandle -or !$renderer) { throw 'No browser window or renderer process was observed.' }
+    Start-Sleep -Seconds 2
     $zero = [IntPtr]::Zero
     $main = [BrowserWindows]::FindWindow('AquaFrame.Main', 'Aqua Frame')
     $edit = [BrowserWindows]::FindWindowEx($main, $zero, 'Edit', $null)
     $messageResult = $zero
-    if (!$main -or !$edit -or ![BrowserWindows]::SendMessageTimeout(
-            $edit, 0x000c, $zero, 'aqua://extensions', 2, 5000, [ref]$messageResult)) {
+    if ($main -eq $zero -or $edit -eq $zero -or [BrowserWindows]::SendMessageTimeout(
+            $edit, 0x000c, $zero, 'aqua://extensions', 2, 5000, [ref]$messageResult) -eq $zero -or
+            $messageResult -eq $zero) {
         throw 'Unable to enter the extensions address.'
     }
     if (![BrowserWindows]::PostMessage($edit, 0x0100, [IntPtr]13, $zero)) {
