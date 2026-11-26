@@ -36,6 +36,24 @@ jobs:
               [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string kind, string title);
               [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr window, uint msg, IntPtr w, string text);
               [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint msg, IntPtr w, IntPtr l);
+              private delegate bool Callback(IntPtr window, IntPtr unused);
+              [DllImport("user32.dll")] private static extern bool EnumWindows(Callback callback, IntPtr unused);
+              [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr window, System.Text.StringBuilder text, int size);
+              public static IntPtr FindManager(int pid) {
+                  IntPtr result = IntPtr.Zero;
+                  EnumWindows((window, unused) => {
+                      GetWindowThreadProcessId(window, out uint owner);
+                      if (owner != pid) return true;
+                      var title = new System.Text.StringBuilder(256);
+                      GetWindowText(window, title, title.Capacity);
+                      Console.WriteLine("Window " + window + ": " + title);
+                      if (title.ToString() != "Расширения — Aqua Frame") return true;
+                      result = window;
+                      return false;
+                  }, IntPtr.Zero);
+                  return result;
+              }
               [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
               [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
               [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -51,21 +69,21 @@ jobs:
                   if ($process.HasExited) { throw "Browser exited with $($process.ExitCode)." }
                   $window = [Capture]::FindWindow("AquaFrame.Main", "Aqua Frame")
               } until ($window -ne [IntPtr]::Zero -or (Get-Date) -gt $deadline)
-              if (!$window) { throw 'Aqua Frame window did not appear.' }
+              if ($window -eq [IntPtr]::Zero) { throw 'Aqua Frame window did not appear.' }
               $main = $window
               $zero = [IntPtr]::Zero
               Start-Sleep -Seconds 3
               $edit = [Capture]::FindWindowEx($main, $zero, 'Edit', $null)
-              if (!$edit -or ![Capture]::SendMessage($edit, 0x000c, $zero, 'aqua://extensions') -or
+              if ($edit -eq $zero -or [Capture]::SendMessage($edit, 0x000c, $zero, 'aqua://extensions') -eq $zero -or
                   ![Capture]::PostMessage($edit, 0x0100, [IntPtr]13, $zero)) {
                   throw 'Unable to open the extension manager.'
               }
               $deadline = (Get-Date).AddSeconds(35)
               do {
                   Start-Sleep -Milliseconds 400
-                  $window = [Capture]::FindWindow($null, "Расширения — Aqua Frame")
+                  $window = [Capture]::FindManager($process.Id)
               } until ($window -ne $zero -or (Get-Date) -gt $deadline)
-              if (!$window) { throw 'The Aqua Frame extension window did not appear.' }
+              if ($window -eq [IntPtr]::Zero) { throw 'The Aqua Frame extension window did not appear.' }
               $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
               $width = [Math]::Min(1120, $screen.Width - 40)
               $height = [Math]::Min(740, $screen.Height - 40)
