@@ -1,4 +1,4 @@
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import sys
@@ -36,4 +36,4 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(PAGE)
 
-HTTPServer(('127.0.0.1', int(sys.argv[1])), Handler).serve_forever()
+ThreadingHTTPServer(('127.0.0.1', int(sys.argv[1])), Handler).serve_forever()
