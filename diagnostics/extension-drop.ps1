@@ -101,9 +101,15 @@ try {
         $main = [DropFixture]::FindWindow('AquaFrame.Main', 'Aqua Frame')
     } until ($main -ne $zero -or (Get-Date) -gt $deadline)
     if ($main -eq $zero) { throw 'Aqua Frame did not open.' }
+    Start-Sleep -Seconds 3
     $edit = [DropFixture]::FindWindowEx($main, $zero, 'Edit', $null)
-    [void][DropFixture]::SendMessage($edit, 0x000c, $zero, 'aqua://extensions')
-    [void][DropFixture]::PostMessage($edit, 0x0100, [IntPtr]13, $zero)
+    if ($edit -eq $zero) { throw 'Unable to find Aqua Frame address edit control.' }
+    if ([DropFixture]::SendMessage($edit, 0x000c, $zero, 'aqua://extensions') -eq $zero) {
+        throw 'Editing the address failed.'
+    }
+    if (![DropFixture]::PostMessage($edit, 0x0100, [IntPtr]13, $zero)) {
+        throw 'Submitting the address failed.'
+    }
     $deadline = (Get-Date).AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 350
