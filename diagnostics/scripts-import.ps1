@@ -26,6 +26,7 @@ public static class AquaScriptUi {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags,int x,int y,uint data,UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window,IntPtr dc,uint flags);
+
 }
 '@
 [void][AquaScriptUi]::SetProcessDPIAware()
@@ -88,16 +89,42 @@ function Click-At([IntPtr]$window, [int]$x, [int]$y) {
     Start-Sleep -Milliseconds 120
     [AquaScriptUi]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
 }
+function Import-Script([IntPtr]$window, [string]$path, [string]$label) {
+    $dialog = $zero
+    foreach ($y in 245, 258, 271, 284, 233, 297, 310, 220) {
+        Click-At $window 345 $y
+        $dialog = Window-For '#32770' 'Импорт JavaScript в Aqua Frame' 1
+        if ($dialog -ne $zero) { break }
+    }
+    if ($dialog -eq $zero) { throw "The JS file chooser did not open for $label." }
+    Screenshot $dialog "scripts-picker-$label.png"
+    [void][AquaScriptUi]::SetForegroundWindow($dialog)
+    Start-Sleep -Milliseconds 300
+    [Windows.Forms.SendKeys]::SendWait($path + '{ENTER}')
+    $confirm = Window-For '#32770' 'Разрешение Aqua Scripts' 12
+    if ($confirm -eq $zero) {
+        Screenshot $dialog "scripts-picker-error-$label.png"
+        throw "Aqua Scripts did not ask for site permission for $label."
+    }
+    Screenshot $confirm "scripts-permission-$label.png"
+    $yes = [AquaScriptUi]::GetDlgItem($confirm, 6)
+    if ($yes -eq $zero -or ![AquaScriptUi]::PostMessage($yes, 0x00f5, $zero, $zero)) {
+        throw "Unable to approve the fixture site for $label."
+    }
+    Start-Sleep -Seconds 2
+}
 $port = 39123
 $site = "http://127.0.0.1:$port/"
 $other = "http://localhost:$port/"
 $profile = Join-Path $env:LOCALAPPDATA 'Aqua Frame/User Data'
 $library = Join-Path $profile 'aqua-scripts.json'
 $script = Join-Path $env:RUNNER_TEMP 'aqua-scope-fixture.user.js'
+$plain = Join-Path $env:RUNNER_TEMP 'aqua-plain-fixture.js'
+'document.documentElement.dataset.aquaPlain = "ran";' | Set-Content -LiteralPath $plain -Encoding utf8
 @'
 // ==UserScript==
 // @name Aqua Scope Fixture
-// @match http://127.0.0.1/*
+// @match http://*/*
 // @grant none
 // ==/UserScript==
 window.aquaIsolatedFixture = 'private';
@@ -118,45 +145,28 @@ try {
     Open-Address $window $site
     Open-Address $window 'aqua://settings/#scripts'
     Screenshot $window 'scripts-before.png'
-    $dialog = $zero
-    foreach ($y in 245, 258, 271, 284, 297, 310) {
-        Click-At $window 345 $y
-        $dialog = Window-For '#32770' 'Импорт JavaScript в Aqua Frame' 1
-        if ($dialog -ne $zero) { break }
+    Import-Script $window $script 'userscript'
+    Import-Script $window $plain 'plain'
+    $entries = @(Get-Content $library -Raw | ConvertFrom-Json)
+    if ($entries.Count -ne 2) { throw 'Both scripts must be saved.' }
+    foreach ($entry in $entries) {
+        if ($entry.origin -ne $site.TrimEnd('/') -or !$entry.enabled) { throw 'An approved script was not saved.' }
     }
-    if ($dialog -eq $zero) { throw 'The JS file chooser did not open.' }
-    Screenshot $dialog 'scripts-picker.png'
-    [void][AquaScriptUi]::SetForegroundWindow($dialog)
-    Start-Sleep -Milliseconds 300
-    [Windows.Forms.SendKeys]::SendWait($script + '{ENTER}')
-    $confirm = Window-For '#32770' 'Разрешение Aqua Scripts' 12
-    if ($confirm -eq $zero) {
-        Screenshot $dialog 'scripts-picker-error.png'
-        throw 'Aqua Scripts did not ask for site permission.'
-    }
-    Screenshot $confirm 'scripts-permission.png'
-    $yes = [AquaScriptUi]::GetDlgItem($confirm, 6)
-    if ($yes -eq $zero -or ![AquaScriptUi]::PostMessage($yes, 0x00f5, $zero, $zero)) {
-        throw 'Unable to approve the fixture site.'
-    }
-    Start-Sleep -Seconds 2
-    $entry = Get-Content $library -Raw | ConvertFrom-Json
-    if ($entry.origin -ne $site.TrimEnd('/') -or !$entry.enabled) { throw 'The approved script was not saved.' }
     Screenshot $window 'scripts-imported.png'
-    Open-Address $window ($site + '?probe=approved')
+    Open-Address $window ($site + '?probe=approved#board')
     Start-Sleep -Seconds 3
     Screenshot $window 'scripts-approved.png'
     Open-Address $window ($other + '?probe=other')
     Start-Sleep -Seconds 3
     $observed = Get-Content $env:AQUA_SCRIPT_PROBE -Raw
     Write-Host $observed
-    if ($observed -notmatch 'approved:ran:undefined') {
-        throw 'The approved document was not updated from an isolated world.'
+    if ($observed -notmatch 'approved:ran:undefined:ran') {
+        throw 'Both scripts should update the approved document from the isolated world.'
     }
-    if ($observed -notmatch 'other:none:undefined' -or $observed -match 'other:ran') {
+    if ($observed -notmatch 'other:none:undefined:none' -or $observed -match 'other:ran') {
         throw 'The script ran on another origin.'
     }
-    Write-Host 'Imported a user.js file, approved one origin, and verified isolated execution only on that origin.'
+    Write-Host 'Imported JS and user.js files, verified isolated execution on the approved origin, and rejected another origin.'
 } finally {
     if ($process -and !$process.HasExited) {
         $window = Window-For 'AquaFrame.Main' 'Aqua Frame' 1

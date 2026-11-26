@@ -10,8 +10,9 @@ setTimeout(() => {
     const probe = new URL(location.href).searchParams.get("probe");
     const dom = document.documentElement.dataset.aquaFixture || "none";
     const world = typeof window.aquaIsolatedFixture;
-    if (probe) fetch("/probe?" + new URLSearchParams({probe, dom, world}));
-    document.body.append(" DOM: " + dom + " | page global: " + world);
+    const plain = document.documentElement.dataset.aquaPlain || "none";
+    if (probe) fetch("/probe?" + new URLSearchParams({probe, dom, world, plain}));
+    document.body.append(" DOM: " + dom + " | page global: " + world + " | JS: " + plain);
 }, 1600);
 </script>"""
 
@@ -21,7 +22,7 @@ class Fixture(BaseHTTPRequestHandler):
         if parsed.path == "/probe":
             data = parse_qs(parsed.query)
             with Path(os.environ["AQUA_SCRIPT_PROBE"]).open("a", encoding="utf8") as log:
-                log.write(":".join(data[key][0] for key in ("probe", "dom", "world")) + "\n")
+                log.write(":".join(data[key][0] for key in ("probe", "dom", "world", "plain")) + "\n")
             self.send_response(204)
             self.end_headers()
             return
