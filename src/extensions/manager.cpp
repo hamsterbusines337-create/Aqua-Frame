@@ -6,6 +6,7 @@
 #include "include/views/cef_browser_view.h"
 #include "include/views/cef_browser_view_delegate.h"
 #include "include/views/cef_button_delegate.h"
+#include "include/views/cef_fill_layout.h"
 #include "include/views/cef_label_button.h"
 #include "include/views/cef_window.h"
 #include "include/views/cef_window_delegate.h"
