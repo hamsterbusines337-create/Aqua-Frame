@@ -26,6 +26,20 @@ public static class AquaWindowUi {
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags,int x,int y,uint data,UIntPtr extra);
     [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr window);
+    private delegate bool EnumChildProc(IntPtr window, IntPtr param);
+    [DllImport("user32.dll")] private static extern bool EnumChildWindows(IntPtr parent, EnumChildProc callback, IntPtr param);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern IntPtr SendMessageTimeout(
+        IntPtr window, uint msg, UIntPtr w, StringBuilder text, uint flags, uint timeout, out UIntPtr result);
+    public static string DialogText(IntPtr dialog) {
+        var captions = new StringBuilder();
+        EnumChildWindows(dialog, (window, param) => {
+            var text = new StringBuilder(2000);
+            SendMessageTimeout(window, 0x000d, (UIntPtr)text.Capacity, text, 2, 1000, out _);
+            if (text.Length > 0) captions.AppendLine(text.ToString());
+            return true;
+        }, IntPtr.Zero);
+        return captions.ToString();
+    }
     [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window,IntPtr dc,uint flags);
 
 }
@@ -120,15 +134,15 @@ function Request-Log {
     return ''
 }
 
-function Find-Report([IntPtr]$dialog) {
-    $position = $zero
+
+function Wait-Request([string]$expected) {
+    $deadline = (Get-Date).AddSeconds(10)
     do {
-        $position = [AquaWindowUi]::FindWindowEx($dialog, $position, 'Static', $null)
-        if ($position -eq $zero) { return '' }
-        $message = [Text.StringBuilder]::new(1600)
-        [void][AquaWindowUi]::SendMessage($position, 0x000d, [IntPtr]$message.Capacity, $message)
-        if ($message.Length -gt 10) { return $message.ToString() }
-    } while ($true)
+        $log = Request-Log
+        if ($log -match $expected) { return }
+        Start-Sleep -Milliseconds 300
+    } while ((Get-Date) -lt $deadline)
+    throw "No HTTP request matching $expected. Observed: $log"
 }
 
 $port = 39176
@@ -146,7 +160,7 @@ try {
     [void][AquaWindowUi]::SetForegroundWindow($window)
     Start-Sleep -Seconds 3
     Open-Address $window "$site/normal"
-    if ((Request-Log) -notmatch '(?m)^/normal\|') { throw 'Normal navigation did not reach the fixture.' }
+    Wait-Request '(?m)^/normal\|'
     Click-At $window 400 240
     [Windows.Forms.SendKeys]::SendWait('^d')
     Start-Sleep -Seconds 1
@@ -159,7 +173,7 @@ try {
     if ($dialog -eq $zero) { throw 'The navigation timing report did not open.' }
     Start-Sleep -Milliseconds 500
     Screenshot $dialog 'browser-timing.png'
-    $report = Find-Report $dialog
+    $report = [AquaWindowUi]::DialogText($dialog)
     Write-Host "Aqua Performance report: $report"
     if ($report -notmatch 'TTFB\):\s*(\d+)[.,]\d+') {
         $timingError = "No first-byte timing found. Report: $report"
@@ -169,8 +183,11 @@ try {
               $report -notmatch 'CPU' -or $report -notmatch 'Chromium 158') {
         $timingError = "The performance report is missing measured browser and page values. Report: $report"
     }
-    [void][AquaWindowUi]::PostMessage([AquaWindowUi]::GetDlgItem($dialog, 1), 0x00f5, $zero, $zero)
-    Start-Sleep -Milliseconds 500
+    [void][AquaWindowUi]::SetForegroundWindow($dialog)
+    [Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 600
+    if ([AquaWindowUi]::IsWindowVisible($dialog)) { throw 'The test could not dismiss the performance report.' }
+    [void][AquaWindowUi]::SetForegroundWindow($window)
 
     Click-At $window 100 111
     Assert-WindowMode $window $true 'A web element enters actual fullscreen'
