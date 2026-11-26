@@ -12,6 +12,27 @@ public static class DropFixture {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr hwnd, uint msg, IntPtr w, string text);
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint msg, IntPtr w, IntPtr l);
     [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hwnd, int show);
+    [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr hwnd, IntPtr dc, uint flags);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    private delegate bool Callback(IntPtr hwnd, IntPtr l);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(Callback callback, IntPtr l);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode)] private static extern int GetWindowText(IntPtr hwnd, System.Text.StringBuilder text, int size);
+
+    public static IntPtr ManagerWindow(int pid) {
+        IntPtr result = IntPtr.Zero;
+        EnumWindows((hwnd, unused) => {
+            uint owner;
+            GetWindowThreadProcessId(hwnd, out owner);
+            if (owner != pid) return true;
+            var title = new System.Text.StringBuilder(256);
+            GetWindowText(hwnd, title, title.Capacity);
+            if (title.ToString().IndexOf("Extensions", StringComparison.OrdinalIgnoreCase) < 0) return true;
+            result = hwnd;
+            return false;
+        }, IntPtr.Zero);
+        return result;
+    }
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int w, int h, uint flags);
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hwnd, out Rect bounds);
     [DllImport("user32.dll")] public static extern bool SetCursorPos(int x, int y);
@@ -69,7 +90,7 @@ $process = Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
 $zero = [IntPtr]::Zero
 $main = $zero
 function Find-Named($element, [string]$name) {
-    $condition = New-Object Windows.Automation.PropertyCondition(
+    $condition = [Windows.Automation.PropertyCondition]::new(
         [Windows.Automation.AutomationElement]::NameProperty, $name)
     $element.FindFirst([Windows.Automation.TreeScope]::Descendants, $condition)
 }
@@ -86,21 +107,33 @@ try {
     $deadline = (Get-Date).AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 350
-        $manager = [DropFixture]::FindWindow('Chrome_WidgetWin_1', $null)
-        if ($manager -ne $zero) {
-            $element = [Windows.Automation.AutomationElement]::FromHandle($manager)
-            $dev = Find-Named $element 'Developer mode'
-        }
-    } until ($dev -or (Get-Date) -gt $deadline)
+        $manager = [DropFixture]::ManagerWindow($process.Id)
+    } until ($manager -ne $zero -or (Get-Date) -gt $deadline)
+    if ($manager -eq $zero) { throw 'The Chromium extension manager did not appear.' }
+    $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+    [void][DropFixture]::ShowWindow($manager, 9)
+    [void][DropFixture]::SetWindowPos($manager, [IntPtr](-1), 145, 30,
+        [Math]::Min(850,$screen.Width-160), [Math]::Min(700,$screen.Height-65), 0x0040)
+    Start-Sleep -Seconds 2
+    $r = New-Object DropFixture+Rect
+    if (![DropFixture]::GetWindowRect($manager, [ref]$r)) { throw 'Unable to locate the manager.' }
+    $size = [Drawing.Size]::new($r.Right - $r.Left, $r.Bottom - $r.Top)
+    $bmp = [Drawing.Bitmap]::new($size.Width, $size.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bmp)
+    try {
+        $dc = $graphics.GetHdc()
+        try { [void][DropFixture]::PrintWindow($manager, $dc, 2) }
+        finally { $graphics.ReleaseHdc($dc) }
+        $bmp.Save((Join-Path $PWD 'extension-manager.png'), [Drawing.Imaging.ImageFormat]::Png)
+    } finally {
+        $graphics.Dispose()
+        $bmp.Dispose()
+    }
+    $element = [Windows.Automation.AutomationElement]::FromHandle($manager)
+    $dev = Find-Named $element 'Developer mode'
     if (!$dev) { throw 'Unable to find the Chromium Developer mode switch.' }
     $toggle = $dev.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
     if ($toggle.Current.ToggleState -eq 'Off') { $toggle.Toggle() }
-    $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
-    [void][DropFixture]::SetWindowPos($manager, $zero, 145, 30, [Math]::Min(850,$screen.Width-160),
-        [Math]::Min(700,$screen.Height-65), 0x0040)
-    Start-Sleep -Milliseconds 700
-    $r = New-Object DropFixture+Rect
-    if (![DropFixture]::GetWindowRect($manager, [ref]$r)) { throw 'Unable to locate the manager.' }
     $x = [int](($r.Left + $r.Right) / 2)
     $y = [int](($r.Top + $r.Bottom) / 2)
     $effect = [DropFixture]::Drag($archive, $x, $y)

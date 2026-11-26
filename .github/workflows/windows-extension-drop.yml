@@ -28,3 +28,9 @@ jobs:
       - name: Drag a Manifest V3 ZIP using Windows OLE
         shell: powershell
         run: powershell.exe -NoProfile -STA -File diagnostics/extension-drop.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: Extension-manager-screen
+          path: extension-manager.png
+          if-no-files-found: ignore
