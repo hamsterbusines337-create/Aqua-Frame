@@ -1,0 +1,44 @@
+name: Aqua Frame Windows x64
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  release-build:
+    runs-on: windows-2022
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          persist-credentials: false
+      - name: Prepare official CEF binaries
+        shell: powershell
+        run: ./scripts/setup-cef.ps1
+      - name: Build Release
+        shell: cmd
+        run: call build.bat
+      - name: Smoke test browser process and renderer
+        shell: pwsh
+        run: ./tests/smoke.ps1
+      - name: Assemble portable files and installer
+        shell: pwsh
+        run: ./scripts/package.ps1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: AquaFrame-Windows-x64
+          if-no-files-found: error
+          compression-level: 0
+          path: |
+            dist/AquaFrame-Setup.exe
+            dist/AquaFrame-Portable.zip
+            dist/SHA256SUMS.txt
+            dist/cef-package.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: AquaFrame-Runtime-x64
+          if-no-files-found: error
+          compression-level: 0
+          path: dist/runtime/

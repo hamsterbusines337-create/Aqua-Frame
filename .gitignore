@@ -1,0 +1,5 @@
+/build/
+/dist/
+/third_party/cef/
+/third_party/downloads/
+/third_party/.cef-*/
