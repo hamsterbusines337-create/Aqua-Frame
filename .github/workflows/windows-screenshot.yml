@@ -15,9 +15,9 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 45777112126 --repo "${{ github.repository }}" --interval 12 --exit-status
+          gh run watch 45782909850 --repo "${{ github.repository }}" --interval 12 --exit-status
           if ($LASTEXITCODE -ne 0) { throw "The revised Windows build failed." }
-          gh run download 45777112126 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          gh run download 45782909850 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
           if ($LASTEXITCODE -ne 0) { throw 'Unable to download the tested runtime.' }
           icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
           if ($LASTEXITCODE -ne 0) { throw 'Unable to set runtime sandbox permissions.' }
@@ -33,6 +33,9 @@ jobs:
               [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
               [DllImport("user32.dll", SetLastError=true)] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
               [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string kind, string title);
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent, IntPtr after, string kind, string title);
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr window, uint msg, IntPtr w, string text);
+              [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window, uint msg, IntPtr w, IntPtr l);
               [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
               [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
               [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -49,6 +52,20 @@ jobs:
                   $window = [Capture]::FindWindow("AquaFrame.Main", "Aqua Frame")
               } until ($window -ne [IntPtr]::Zero -or (Get-Date) -gt $deadline)
               if (!$window) { throw 'Aqua Frame window did not appear.' }
+              $main = $window
+              $zero = [IntPtr]::Zero
+              Start-Sleep -Seconds 3
+              $edit = [Capture]::FindWindowEx($main, $zero, 'Edit', $null)
+              if (!$edit -or ![Capture]::SendMessage($edit, 0x000c, $zero, 'aqua://extensions') -or
+                  ![Capture]::PostMessage($edit, 0x0100, [IntPtr]13, $zero)) {
+                  throw 'Unable to open the extension manager.'
+              }
+              $deadline = (Get-Date).AddSeconds(35)
+              do {
+                  Start-Sleep -Milliseconds 400
+                  $window = [Capture]::FindWindow($null, "Расширения — Aqua Frame")
+              } until ($window -ne $zero -or (Get-Date) -gt $deadline)
+              if (!$window) { throw 'The Aqua Frame extension window did not appear.' }
               $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
               $width = [Math]::Min(1120, $screen.Width - 40)
               $height = [Math]::Min(740, $screen.Height - 40)
@@ -80,7 +97,7 @@ jobs:
               }
           } finally {
               if (!$process.HasExited) {
-                  if (!$process.CloseMainWindow() -or !$process.WaitForExit(20000)) { Stop-Process -Id $process.Id -Force }
+                  if (!$main -or ![Capture]::PostMessage($main, 0x0010, [IntPtr]::Zero, [IntPtr]::Zero) -or !$process.WaitForExit(20000)) { Stop-Process -Id $process.Id -Force }
               }
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
