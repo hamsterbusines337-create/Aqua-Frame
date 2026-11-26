@@ -18,12 +18,20 @@ bool StartResetHelper(HANDLE profile_gate) {
     const auto binary = ExecutablePath();
     if (binary.empty()) return false;
     const auto helper = binary.parent_path() / L"AquaFrameReset.exe";
-    std::array<HANDLE, 2> handles{};
+    std::array<HANDLE, 3> handles{};
     const HANDLE self = GetCurrentProcess();
     if (!DuplicateHandle(self, self, self, &handles[0],
                          SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, TRUE, 0)) return false;
     if (!DuplicateHandle(self, profile_gate, self, &handles[1], 0, TRUE, DUPLICATE_SAME_ACCESS)) {
         CloseHandle(handles[0]);
+        return false;
+    }
+
+    SECURITY_ATTRIBUTES inheritable{sizeof(SECURITY_ATTRIBUTES), nullptr, TRUE};
+    handles[2] = CreateEventW(&inheritable, TRUE, FALSE, nullptr);
+    if (!handles[2]) {
+        CloseHandle(handles[0]);
+        CloseHandle(handles[1]);
         return false;
     }
 
@@ -41,13 +49,15 @@ bool StartResetHelper(HANDLE profile_gate) {
             PROCESS_INFORMATION process{};
             auto command = L"\"" + helper.wstring() + L"\" " +
                 std::to_wstring(reinterpret_cast<uintptr_t>(handles[0])) + L" " +
-                std::to_wstring(reinterpret_cast<uintptr_t>(handles[1]));
+                std::to_wstring(reinterpret_cast<uintptr_t>(handles[1])) + L" " +
+                std::to_wstring(reinterpret_cast<uintptr_t>(handles[2]));
             if (CreateProcessW(helper.c_str(), command.data(), nullptr, nullptr, TRUE,
                                EXTENDED_STARTUPINFO_PRESENT, nullptr, helper.parent_path().c_str(),
                                &startup.StartupInfo, &process)) {
                 CloseHandle(process.hThread);
+                const HANDLE ready_or_exit[]{handles[2], process.hProcess};
+                started = WaitForMultipleObjects(2, ready_or_exit, FALSE, 10000) == WAIT_OBJECT_0;
                 CloseHandle(process.hProcess);
-                started = true;
             }
         }
         DeleteProcThreadAttributeList(attributes);

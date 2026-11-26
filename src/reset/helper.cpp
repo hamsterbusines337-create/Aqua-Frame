@@ -43,10 +43,11 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
     int count = 0;
     auto args = CommandLineToArgvW(GetCommandLineW(), &count);
     if (!args) return 1;
-    const auto parent = count == 3 ? ParseHandle(args[1]) : nullptr;
-    const auto gate = count == 3 ? ParseHandle(args[2]) : nullptr;
+    const auto parent = count == 4 ? ParseHandle(args[1]) : nullptr;
+    const auto gate = count == 4 ? ParseHandle(args[2]) : nullptr;
+    const auto ready = count == 4 ? ParseHandle(args[3]) : nullptr;
     LocalFree(args);
-    if (!parent || !gate) return 1;
+    if (!parent || !gate || !ready) return 1;
 
     // Do not pass the exclusive profile handle to any further child process.
     if (!SetHandleInformation(gate, HANDLE_FLAG_INHERIT, 0)) return 1;
@@ -64,16 +65,19 @@ int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
         !SamePath(HandlePath(gate), (profile.parent_path() / L"Profile.lock").wstring())) {
         return Failed(L"Папку профиля не удалось проверить. Сброс остановлен.");
     }
-    if (WaitForSingleObject(parent, 60000) != WAIT_OBJECT_0)
-        return Failed(L"Aqua Frame не завершился. Очистка остановлена.");
-    CloseHandle(parent);
-
     PWSTR download_path = nullptr;
     if (FAILED(SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DONT_VERIFY, nullptr, &download_path))) {
         return Failed(L"Не удалось проверить расположение папки загрузок. Очистка остановлена.");
     }
     const std::filesystem::path downloads(download_path);
     CoTaskMemFree(download_path);
+
+    // Signal only after receiving and validating both inherited handles.
+    if (!SetEvent(ready)) return 1;
+    CloseHandle(ready);
+    if (WaitForSingleObject(parent, 60000) != WAIT_OBJECT_0)
+        return Failed(L"Aqua Frame не завершился. Очистка остановлена.");
+    CloseHandle(parent);
 
     std::error_code error;
     for (int attempt = 0; attempt < 20; ++attempt) {
