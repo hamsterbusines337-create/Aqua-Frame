@@ -1,6 +1,7 @@
 #include "manager.h"
 
 #include "include/cef_frame.h"
+#include "include/cef_image.h"
 #include "include/cef_request_context.h"
 #include "include/views/cef_box_layout.h"
 #include "include/views/cef_browser_view.h"
@@ -20,6 +21,22 @@ constexpr auto extensions_url = "chrome://extensions/";
 constexpr cef_color_t aqua_toolbar = 0xff14243a;
 constexpr cef_color_t aqua_background = 0xff0b1628;
 constexpr cef_color_t aqua_accent = 0xff7dd3fc;
+constexpr WORD mark_resource_id = 101;
+
+CefRefPtr<CefImage> LoadAquaMark() {
+    const auto module = GetModuleHandleW(L"AquaFrame.dll");
+    if (!module) return nullptr;
+    const auto resource = FindResourceW(module, MAKEINTRESOURCEW(mark_resource_id), RT_RCDATA);
+    if (!resource) return nullptr;
+    const auto loaded = LoadResource(module, resource);
+    const auto size = SizeofResource(module, resource);
+    const auto bytes = loaded ? LockResource(loaded) : nullptr;
+    if (!bytes || !size) return nullptr;
+
+    auto image = CefImage::CreateImage();
+    if (!image->AddPNG(1.0f, bytes, size)) return nullptr;
+    return image;
+}
 
 class ManagerBrowserView final : public CefBrowserViewDelegate {
 public:
@@ -33,6 +50,10 @@ private:
 
 class InstallHelp final : public CefButtonDelegate {
 public:
+    void OnThemeChanged(CefRefPtr<CefView> view) override {
+        view->SetBackgroundColor(aqua_toolbar);
+    }
+
     void OnButtonPressed(CefRefPtr<CefButton> button) override {
         auto window = button->GetWindow();
         if (!window) return;
@@ -56,6 +77,10 @@ public:
 
     void OnWindowCreated(CefRefPtr<CefWindow> window) override {
         window->SetTitle(L"Расширения — Aqua Frame");
+        if (auto mark = LoadAquaMark()) {
+            window->SetWindowIcon(mark);
+            window->SetWindowAppIcon(mark);
+        }
         window->SetBackgroundColor(aqua_background);
         const BOOL dark = TRUE;
         DwmSetWindowAttribute(window->GetWindowHandle(), 20, &dark, sizeof(dark));
@@ -70,6 +95,7 @@ public:
         auto help = CefLabelButton::CreateLabelButton(new InstallHelp, L"Как перетащить файл");
         help->SetMinimumSize(CefSize(0, 42));
         help->SetEnabledTextColors(aqua_accent);
+        help->SetBackgroundColor(aqua_toolbar);
         help->SetFontList("Segoe UI, 13px");
         help->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         toolbar->AddChildView(help);

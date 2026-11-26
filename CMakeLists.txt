@@ -3,6 +3,7 @@ project(AquaFrame VERSION 1.0.0 LANGUAGES C CXX)
 if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "Aqua Frame requires Windows x64 and MSVC.")
 endif()
+enable_language(RC)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(USE_SANDBOX ON CACHE BOOL "Enable the Chromium sandbox")
@@ -15,7 +16,9 @@ find_package(CEF REQUIRED)
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 ADD_LOGICAL_TARGET(libcef_lib "${CEF_LIB_DEBUG}" "${CEF_LIB_RELEASE}")
 SET_CEF_TARGET_OUT_DIR()
+configure_file(src/ui/resources.rc.in resources.rc @ONLY)
 add_library(AquaFrame SHARED
+  "${CMAKE_CURRENT_BINARY_DIR}/resources.rc"
   src/browser/main.cpp
   src/chromium/client.cpp
   src/extensions/manager.cpp

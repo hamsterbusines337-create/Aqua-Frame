@@ -68,8 +68,8 @@ try {
     do {
         Start-Sleep -Milliseconds 400
         $manager = [BrowserWindows]::FindExtensionsWindow($process.Id)
-    } while (!$manager -and (Get-Date) -lt $deadline)
-    if (!$manager) { throw 'The Aqua Frame extension manager window did not appear.' }
+    } while ($manager -eq $zero -and (Get-Date) -lt $deadline)
+    if ($manager -eq $zero) { throw 'The Aqua Frame extension manager window did not appear.' }
     if (![BrowserWindows]::PostMessage($main, 0x0010, $zero, $zero)) {
         throw 'Unable to send a close request to Aqua Frame.'
     }
