@@ -29,7 +29,7 @@
 
 - [Windows Release 45829150897](https://github.com/hamsterbusines337-create/Aqua-Frame/actions/runs/45829150897), коммит `b81ed28`. Настройки оформлены по макету Aqua Deep Ocean. Добавлены 13 пунктов меню, выбор темы и страницы запуска, ограничение количества восстанавливаемых вкладок и кнопка расширений на панели.
 - [Проверка интерфейса 45829222760](https://github.com/hamsterbusines337-create/Aqua-Frame/actions/runs/45829222760). Проверены кнопка расширений, настройки поиска, сессии, темы и масштаба, оба режима сброса и перезапуск с чистым профилем. [Скриншот настроек](https://raw.githubusercontent.com/hamsterbusines337-create/Aqua-Frame/a4b3874602c10b6150762e6a4799ab18c028bbd9/AquaFrame-reference-general.png).
-- [Windows Release 45840603559](https://github.com/hamsterbusines337-create/Aqua-Frame/actions/runs/45840603559) и [проверка Aqua Scripts 45840796762](https://github.com/hamsterbusines337-create/Aqua-Frame/actions/runs/45840796762). Автотест подтвердил выбор `.user.js`, диалог разрешения, сохранение и выполнение в изолированном мире. Реальное перетаскивание из Проводника ещё не проверено.
+- [Windows Release 45841697281](https://github.com/hamsterbusines337-create/Aqua-Frame/actions/runs/45841697281) и [проверка Aqua Scripts 45841848859](https://github.com/hamsterbusines337-create/Aqua-Frame/actions/runs/45841848859). Автотест подтвердил выбор `.js` и `.user.js`, диалог разрешения, сохранение и изолированное выполнение на разрешённом сайте по URL с фрагментом. На другом сайте оба скрипта остались выключены. Реальное перетаскивание из Проводника ещё не проверено.
 
 ## Следующие этапы
 
