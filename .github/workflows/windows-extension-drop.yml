@@ -26,6 +26,7 @@ jobs:
           icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
           if ($LASTEXITCODE -ne 0) { throw 'Could not set sandbox ACLs.' }
       - name: Drag a Manifest V3 ZIP using Windows OLE
+        timeout-minutes: 3
         shell: powershell
         run: powershell.exe -NoProfile -STA -File diagnostics/extension-drop.ps1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02

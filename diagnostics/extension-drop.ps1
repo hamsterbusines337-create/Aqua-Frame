@@ -136,10 +136,18 @@ try {
         $bmp.Dispose()
     }
     $element = [Windows.Automation.AutomationElement]::FromHandle($manager)
+    $toggle = $null
     $dev = Find-Named $element 'Developer mode'
-    if (!$dev) { throw 'Unable to find the Chromium Developer mode switch.' }
-    $toggle = $dev.GetCurrentPattern([Windows.Automation.TogglePattern]::Pattern)
-    if ($toggle.Current.ToggleState -eq 'Off') { $toggle.Toggle() }
+    if ($dev -and $dev.TryGetCurrentPattern([Windows.Automation.TogglePattern]::Pattern, [ref]$toggle)) {
+        if ($toggle.Current.ToggleState -eq 'Off') { $toggle.Toggle() }
+    } else {
+        # The screenshot confirms the switch is at this offset in the fresh,
+        # English Chromium window on this Windows runner.
+        [void][DropFixture]::SetCursorPos($r.Right - 33, $r.Top + 115)
+        [DropFixture]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+        [DropFixture]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    }
+    Start-Sleep -Milliseconds 500
     $x = [int](($r.Left + $r.Right) / 2)
     $y = [int](($r.Top + $r.Bottom) / 2)
     $effect = [DropFixture]::Drag($archive, $x, $y)
@@ -147,11 +155,18 @@ try {
     $deadline = (Get-Date).AddSeconds(20)
     do {
         Start-Sleep -Milliseconds 350
-        $installed = Find-Named $element 'Aqua Frame Drag Fixture'
+        $installed = Get-ChildItem -LiteralPath $profile -Filter manifest.json -File -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { (Get-Content -LiteralPath $_.FullName -Raw) -match 'Aqua Frame Drag Fixture' } |
+            Select-Object -First 1
     } until ($installed -or (Get-Date) -gt $deadline)
-    if (!$installed) { throw 'The ZIP extension did not appear in the manager.' }
-    Write-Host 'The Chromium manager installed the Manifest V3 extension from a Windows OLE ZIP drop.'
+    if (!$installed) { throw 'Chromium did not extract the ZIP extension into its profile.' }
 } finally {
     if ($main -ne $zero) { [void][DropFixture]::PostMessage($main, 0x0010, $zero, $zero) }
     if (!$process.WaitForExit(15000)) { Stop-Process -Id $process.Id -Force }
 }
+
+$registered = Get-ChildItem -LiteralPath $profile -File -Recurse |
+    Where-Object { $_.Name -in @('Preferences','Secure Preferences') } |
+    Where-Object { (Get-Content -LiteralPath $_.FullName -Raw) -match 'Aqua Frame Drag Fixture' }
+if (!$registered) { throw 'Chromium did not register the dropped extension.' }
+Write-Host 'The Chromium manager installed and persisted the Manifest V3 extension from a Windows OLE ZIP drop.'
