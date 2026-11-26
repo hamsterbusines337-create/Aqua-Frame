@@ -1,0 +1,128 @@
+name: Aqua Frame Windows shortcut check
+on:
+  push:
+    branches: [codex/aqua-screenshot]
+    paths: ['.github/workflows/windows-shortcut-check.yml']
+permissions:
+  actions: read
+  contents: read
+jobs:
+  check:
+    runs-on: windows-2022
+    timeout-minutes: 8
+    steps:
+      - name: Download the verified Windows build
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run download 45785842225 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          if ($LASTEXITCODE -ne 0) { throw 'Could not download runtime.' }
+          icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not set sandbox ACLs.' }
+      - name: Click YouTube and Chess.com in Aqua Frame
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Add-Type -AssemblyName System.Drawing, System.Windows.Forms
+          Add-Type @'
+          using System;
+          using System.Text;
+          using System.Runtime.InteropServices;
+          public static class ShortcutTest {
+              [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
+              [StructLayout(LayoutKind.Sequential)] public struct Point { public int X, Y; }
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string type,string title);
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindowEx(IntPtr parent,IntPtr after,string type,string title);
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr SendMessage(IntPtr window,uint msg,IntPtr w,StringBuilder text);
+              [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr window,uint msg,IntPtr w,IntPtr l);
+              [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+              [DllImport("user32.dll")] public static extern uint GetDpiForWindow(IntPtr window);
+              [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window,IntPtr after,int x,int y,int width,int height,uint flags);
+              [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window,out Rect rect);
+              [DllImport("user32.dll")] public static extern bool GetClientRect(IntPtr window,out Rect rect);
+              [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr window,ref Point point);
+              [DllImport("user32.dll")] public static extern bool ScreenToClient(IntPtr window,ref Point point);
+              [DllImport("user32.dll")] public static extern IntPtr WindowFromPoint(Point point);
+              [DllImport("user32.dll")] public static extern bool IsChild(IntPtr parent,IntPtr window);
+              [DllImport("user32.dll")] public static extern bool SetCursorPos(int x,int y);
+              [DllImport("user32.dll")] public static extern void mouse_event(uint flags,int x,int y,uint data,UIntPtr extra);
+              [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window,IntPtr dc,uint flags);
+          }
+          '@
+          [void][ShortcutTest]::SetProcessDPIAware()
+          $exe = Join-Path $PWD 'runtime/AquaFrame.exe'
+          $zero = [IntPtr]::Zero
+          $checks = @(
+              @{ Name = 'youtube'; Hostname = 'youtube.com'; Offset = -132 }
+              @{ Name = 'chess'; Hostname = 'chess.com'; Offset = -44 }
+          )
+          foreach ($check in $checks) {
+              $process = Start-Process $exe -WorkingDirectory (Split-Path $exe) -PassThru
+              $window = $zero
+              try {
+                  $deadline = (Get-Date).AddSeconds(25)
+                  do {
+                      Start-Sleep -Milliseconds 300
+                      $window = [ShortcutTest]::FindWindow('AquaFrame.Main', 'Aqua Frame')
+                  } until ($window -ne $zero -or (Get-Date) -gt $deadline -or $process.HasExited)
+                  if ($window -eq $zero) { throw 'The Aqua Frame window did not appear.' }
+                  $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
+                  $width = [Math]::Min(984, $screen.Width - 40)
+                  $height = [Math]::Min(688, $screen.Height - 40)
+                  if (![ShortcutTest]::SetWindowPos($window, [IntPtr](-1), $screen.X + 20, $screen.Y + 20, $width, $height, 64)) {
+                      throw 'Unable to position the Aqua Frame window.'
+                  }
+                  Start-Sleep -Seconds 4
+                  $rect = New-Object ShortcutTest+Rect
+                  if (![ShortcutTest]::GetClientRect($window, [ref]$rect)) { throw 'Unable to find client bounds.' }
+                  $point = New-Object ShortcutTest+Point
+                  $scale = [ShortcutTest]::GetDpiForWindow($window) / 96.0
+                  $toolbar = 76 * $scale
+                  $point.X = [int]($rect.Right / 2 + $check.Offset * $scale)
+                  $point.Y = [int]($toolbar + ($rect.Bottom - $toolbar) / 2 + 84 * $scale)
+                  if (![ShortcutTest]::ClientToScreen($window, [ref]$point)) { throw 'Unable to locate the shortcut on screen.' }
+                  $target = [ShortcutTest]::WindowFromPoint($point)
+                  if (![ShortcutTest]::IsChild($window, $target)) { throw 'The shortcut is outside Aqua Frame.' }
+                  if (![ShortcutTest]::SetCursorPos($point.X, $point.Y)) { throw 'Unable to move the mouse to the shortcut.' }
+                  [ShortcutTest]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+                  Start-Sleep -Milliseconds 120
+                  [ShortcutTest]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+                  $edit = [ShortcutTest]::FindWindowEx($window, $zero, 'Edit', $null)
+                  $deadline = (Get-Date).AddSeconds(12)
+                  do {
+                      Start-Sleep -Milliseconds 300
+                      $address = [Text.StringBuilder]::new(8193)
+                      [void][ShortcutTest]::SendMessage($edit, 0x000d, [IntPtr]$address.Capacity, $address)
+                      $navigation = $address.ToString()
+                      $matchesHost = $navigation -match ('^https://(?:www\.)?' + [regex]::Escape($check.Hostname) + '(?:/|$)')
+                  } until ($matchesHost -or (Get-Date) -gt $deadline)
+                  Start-Sleep -Seconds 3
+                  if ([ShortcutTest]::GetWindowRect($window, [ref]$rect)) {
+                      $bitmap = [Drawing.Bitmap]::new(($rect.Right - $rect.Left), ($rect.Bottom - $rect.Top))
+                      $graphics = [Drawing.Graphics]::FromImage($bitmap)
+                      try {
+                          $dc = $graphics.GetHdc()
+                          try { $printed = [ShortcutTest]::PrintWindow($window, $dc, 2) }
+                          finally { $graphics.ReleaseHdc($dc) }
+                          if ($printed) { $bitmap.Save((Join-Path $PWD "$($check.Name).png"), [Drawing.Imaging.ImageFormat]::Png) }
+                      } finally {
+                          $graphics.Dispose()
+                          $bitmap.Dispose()
+                      }
+                  }
+                  if (!$matchesHost) { throw "Click on $($check.Name) did not navigate to its website. Address: $navigation" }
+                  Write-Host "Clicked $($check.Name) and observed $navigation in Aqua Frame."
+              } finally {
+                  if ($window -ne $zero) { [void][ShortcutTest]::PostMessage($window, 0x0010, $zero, $zero) }
+                  if (!$process.WaitForExit(15000)) { Stop-Process -Id $process.Id -Force }
+              }
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: AquaFrame-Shortcut-Check
+          path: |
+            youtube.png
+            chess.png
+          if-no-files-found: ignore
