@@ -1,6 +1,8 @@
 #include <windows.h>
 #include <filesystem>
+#include <optional>
 #include "include/cef_app.h"
+#include "include/cef_command_line.h"
 #include "include/cef_sandbox_win.h"
 #include "../chromium/pages.h"
 #include "../ui/window.h"
@@ -13,11 +15,20 @@ public:
     App(HINSTANCE instance, int show) : instance_(instance), show_(show) {}
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
     CefRefPtr<CefClient> GetDefaultClient() override { return window_.DefaultChromeClient(); }
+    void OnBeforeCommandLineProcessing(const CefString& process_type,
+                                       CefRefPtr<CefCommandLine> command_line) override {
+        if (!process_type.empty() || profile_.empty()) return;
+        startup_preferences_ = aqua::ReadPreferences(profile_);
+        if (startup_preferences_->prefer_high_performance_gpu)
+            command_line->AppendSwitch("force-high-performance-gpu");
+    }
     void OnRegisterCustomSchemes(CefRawPtr<CefSchemeRegistrar> registrar) override {
         aqua::RegisterAquaScheme(registrar);
     }
     void OnContextInitialized() override {
-        if (!aqua::RegisterAquaPages() || !window_.Create(instance_, show_, profile_)) {
+        auto preferences = startup_preferences_ ? std::move(*startup_preferences_) : aqua::ReadPreferences(profile_);
+        startup_preferences_.reset();
+        if (!aqua::RegisterAquaPages() || !window_.Create(instance_, show_, profile_, std::move(preferences))) {
             failed_ = true;
         }
     }
@@ -30,6 +41,7 @@ private:
     int show_;
     aqua::Window window_;
     std::filesystem::path profile_;
+    std::optional<aqua::Preferences> startup_preferences_;
     bool failed_ = false;
     IMPLEMENT_REFCOUNTING(App);
 };

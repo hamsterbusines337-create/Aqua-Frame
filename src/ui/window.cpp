@@ -76,9 +76,9 @@ void PlaceChild(HWND parent, HWND child, int x, int y, int width, int height) {
 }
 }
 
-bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& profile) {
+bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& profile, Preferences preferences) {
     profile_ = profile;
-    preferences_ = ReadPreferences(profile_);
+    preferences_ = std::move(preferences);
     scripts_.Load(profile_);
     UpdateAquaScriptList(scripts_.Items());
     UpdateAquaPageSettings(preferences_);
@@ -730,6 +730,14 @@ void Window::Navigate() {
         browser->GetMainFrame()->LoadURL(address == L"aqua://settings" ? L"aqua://settings/" : address);
         return;
     }
+    if (address == L"chrome://gpu" || address == L"chrome://gpu/" ||
+        address == L"chrome://version" || address == L"chrome://version/") {
+        if (const auto* tab = Find(selected_); tab && !tab->private_tab) {
+            browser->GetHost()->SetFocus(true);
+            browser->GetMainFrame()->LoadURL(address);
+        }
+        return;
+    }
     const auto url = ResolveAddress(address, preferences_.search);
     if (url.empty()) return;
     SetWindowTextW(edit_, url.c_str());
@@ -1237,6 +1245,10 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
         OpenExtensions();
         return;
     }
+    if (action == SettingsAction::open_gpu_report) {
+        AddTab(L"chrome://gpu/");
+        return;
+    }
     if (action == SettingsAction::open_downloads) {
         PWSTR folder = nullptr;
         bool opened = false;
@@ -1283,6 +1295,8 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
     case SettingsAction::warm_restore_off: next.warm_restored_tab = false; break;
     case SettingsAction::tab_unload_on: next.allow_tab_unload = true; break;
     case SettingsAction::tab_unload_off: next.allow_tab_unload = false; break;
+    case SettingsAction::high_gpu_on: next.prefer_high_performance_gpu = true; break;
+    case SettingsAction::high_gpu_off: next.prefer_high_performance_gpu = false; break;
     case SettingsAction::animations_on: next.animations = true; break;
     case SettingsAction::animations_off: next.animations = false; break;
     case SettingsAction::https_on: next.https_only = true; break;

@@ -16,7 +16,7 @@
 namespace aqua {
 class Window final {
 public:
-    bool Create(HINSTANCE instance, int show, const std::filesystem::path& profile);
+    bool Create(HINSTANCE instance, int show, const std::filesystem::path& profile, Preferences preferences);
     bool ResetRequested() const { return reset_requested_; }
     void QueueSettingsAction(uint64_t tab, SettingsAction action);
     bool QueueScriptAction(uint64_t tab, std::string_view target);

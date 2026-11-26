@@ -18,6 +18,7 @@ struct Preferences {
     bool limit_restored_tabs = false;
     bool warm_restored_tab = false;
     bool allow_tab_unload = true;
+    bool prefer_high_performance_gpu = false;
     int zoom = 100;
     std::vector<std::wstring> session;
     std::vector<PageEntry> history;

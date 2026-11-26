@@ -21,6 +21,8 @@ constexpr std::array actions{
     std::pair{"limit-restore-on", Action::limit_restore_on}, std::pair{"limit-restore-off", Action::limit_restore_off},
     std::pair{"warm-restore-on", Action::warm_restore_on}, std::pair{"warm-restore-off", Action::warm_restore_off},
     std::pair{"tab-unload-on", Action::tab_unload_on}, std::pair{"tab-unload-off", Action::tab_unload_off},
+    std::pair{"high-gpu-on", Action::high_gpu_on}, std::pair{"high-gpu-off", Action::high_gpu_off},
+    std::pair{"gpu-report", Action::open_gpu_report},
     std::pair{"downloads", Action::open_downloads},
     std::pair{"clear-history", Action::clear_history},
     std::pair{"animations-on", Action::animations_on}, std::pair{"animations-off", Action::animations_off},
@@ -182,6 +184,11 @@ std::string RenderSettings(const Preferences& settings, const std::vector<Script
 <div class="card"><h3>Оперативная память</h3>
 <p>Выгруженная вкладка остаётся в списке и открывается заново при выборе. Используйте команду из меню фоновой вкладки, когда на ней нет важных задач или несохранённых данных.</p>)HTML";
     html += Switch("Разрешить ручную выгрузку фоновых вкладок", "tab-unload-on", "tab-unload-off", settings.allow_tab_unload);
+    html += R"HTML(</div><div class="card"><h3>Графика веб-страниц</h3>
+<p>На компьютерах с несколькими видеокартами Chromium может предпочесть более мощную. Для применения требуется перезапуск Aqua Frame.</p>)HTML";
+    html += Switch("Предпочитать высокопроизводительную видеокарту", "high-gpu-on", "high-gpu-off",
+                   settings.prefer_high_performance_gpu);
+    html += "<p>" + Link("gpu-report", "Открыть отчёт об аппаратном ускорении") + "</p>";
     html += R"HTML(</div></section><section id="extensions"><h2>Расширения</h2><div class="card">)HTML";
     html += Link("extensions", "Открыть менеджер");
     html += R"HTML(</div></section>

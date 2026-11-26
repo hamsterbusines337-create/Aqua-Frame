@@ -82,6 +82,7 @@ Preferences ReadPreferences(const std::filesystem::path& profile) {
     result.warm_restored_tab = dictionary->GetBool("warm_restored_tab");
     result.allow_tab_unload = !dictionary->HasKey("allow_tab_unload") ||
         dictionary->GetBool("allow_tab_unload");
+    result.prefer_high_performance_gpu = dictionary->GetBool("prefer_high_performance_gpu");
     result.animations = !dictionary->HasKey("animations") || dictionary->GetBool("animations");
     result.https_only = dictionary->GetBool("https_only");
     result.history = ReadEntries(dictionary, "history");
@@ -110,6 +111,7 @@ bool WritePreferences(const std::filesystem::path& profile, const Preferences& p
     dictionary->SetBool("limit_restored_tabs", preferences.limit_restored_tabs);
     dictionary->SetBool("warm_restored_tab", preferences.warm_restored_tab);
     dictionary->SetBool("allow_tab_unload", preferences.allow_tab_unload);
+    dictionary->SetBool("prefer_high_performance_gpu", preferences.prefer_high_performance_gpu);
     dictionary->SetInt("zoom", preferences.zoom);
     dictionary->SetBool("animations", preferences.animations);
     dictionary->SetBool("https_only", preferences.https_only);

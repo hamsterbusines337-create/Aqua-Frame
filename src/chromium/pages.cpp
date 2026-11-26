@@ -221,6 +221,7 @@ void UpdateAquaPageSettings(const Preferences& settings) {
     page_preferences.limit_restored_tabs = settings.limit_restored_tabs;
     page_preferences.warm_restored_tab = settings.warm_restored_tab;
     page_preferences.allow_tab_unload = settings.allow_tab_unload;
+    page_preferences.prefer_high_performance_gpu = settings.prefer_high_performance_gpu;
     page_preferences.restore_session = settings.restore_session;
     page_preferences.zoom = settings.zoom;
     page_preferences.animations = settings.animations;
