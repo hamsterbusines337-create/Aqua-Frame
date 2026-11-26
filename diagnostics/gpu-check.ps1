@@ -50,8 +50,8 @@ try {
     Start-Sleep -Milliseconds 500
     Screenshot $window 'AquaFrame-GPU-Settings.png'
     $enabled = $false
-    foreach ($y in 516, 530, 544, 558, 572, 586, 600, 502, 488) {
-        Click-At $window 906 $y
+    foreach ($y in 522, 517, 527, 511, 533, 505, 539) {
+        Click-At $window 885 $y
         Start-Sleep -Milliseconds 450
         if (Test-Path -LiteralPath $settings) {
             $prefs = Get-Content -LiteralPath $settings -Raw | ConvertFrom-Json
@@ -77,8 +77,8 @@ try {
     Start-Sleep -Milliseconds 500
     Screenshot $window 'AquaFrame-GPU-Settings-Enabled.png'
     # Also verify the GPU status page has actual Chromium data.
-    Open-Address $window 'chrome://gpu/'
-    Start-Sleep -Seconds 3
+    Click-At $window 414 562
+    Start-Sleep -Seconds 4
     Screenshot $window 'AquaFrame-GPU-Report.png'
     $report = Get-ChromeReport $window
     if ($report -notmatch '(?i)graphics feature status' -or $report -notmatch '(?i)compositing') {
