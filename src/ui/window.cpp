@@ -54,7 +54,7 @@ bool Window::Create(HINSTANCE instance, int show) {
     }
     BOOL dark = TRUE;
     DwmSetWindowAttribute(hwnd_, 20, &dark, sizeof(dark));
-    extensions_ = new ExtensionManager(hwnd_);
+    extensions_ = new ExtensionManager(hwnd_, [this](const std::wstring& url) { AddTab(url); });
     ShowWindow(hwnd_, show);
     AddTab();
     return !tabs_.empty();
