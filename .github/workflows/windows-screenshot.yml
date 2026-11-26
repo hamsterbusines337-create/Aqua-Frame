@@ -29,7 +29,8 @@ jobs:
           using System.Runtime.InteropServices;
           public static class Capture {
               [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-              [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+              [DllImport("user32.dll", SetLastError=true)] public static extern bool SetWindowPos(IntPtr window, IntPtr after, int x, int y, int width, int height, uint flags);
+              [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string kind, string title);
               [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr window, out Rect rect);
               [DllImport("user32.dll")] public static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
               [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
@@ -43,14 +44,16 @@ jobs:
                   Start-Sleep -Milliseconds 400
                   $process.Refresh()
                   if ($process.HasExited) { throw "Browser exited with $($process.ExitCode)." }
-              } until ($process.MainWindowHandle -or (Get-Date) -gt $deadline)
-              $window = $process.MainWindowHandle
+                  $window = [Capture]::FindWindow("AquaFrame.Main", "Aqua Frame")
+              } until ($window -ne [IntPtr]::Zero -or (Get-Date) -gt $deadline)
               if (!$window) { throw 'Aqua Frame window did not appear.' }
               $screen = [Windows.Forms.Screen]::PrimaryScreen.WorkingArea
               $width = [Math]::Min(1120, $screen.Width - 40)
               $height = [Math]::Min(740, $screen.Height - 40)
               if (![Capture]::SetWindowPos($window, [IntPtr](-1), $screen.X + 20, $screen.Y + 20, $width, $height, 64)) {
-                  throw 'Unable to position the Aqua Frame window.'
+                  Write-Host "SetWindowPos failed with error $([Runtime.InteropServices.Marshal]::GetLastWin32Error()); capturing the original bounds."
+              } else {
+                  Start-Sleep -Seconds 1
               }
               Start-Sleep -Seconds 4
               $r = New-Object Capture+Rect
@@ -59,8 +62,12 @@ jobs:
               $bmp = [Drawing.Bitmap]::new($size.Width, $size.Height)
               $g = [Drawing.Graphics]::FromImage($bmp)
               try {
-                  $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $size)
-                  $bmp.Save((Join-Path $PWD 'AquaFrame-Windows.png'), [Drawing.Imaging.ImageFormat]::Png)
+                  try {
+                      $g.CopyFromScreen($r.Left, $r.Top, 0, 0, $size)
+                      $bmp.Save((Join-Path $PWD 'AquaFrame-Windows.png'), [Drawing.Imaging.ImageFormat]::Png)
+                  } catch {
+                      Write-Host "Desktop capture unavailable: $_"
+                  }
                   $dc = $g.GetHdc()
                   try { $printed = [Capture]::PrintWindow($window, $dc, 2) }
                   finally { $g.ReleaseHdc($dc) }
