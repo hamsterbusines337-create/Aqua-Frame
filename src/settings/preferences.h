@@ -6,10 +6,15 @@
 
 namespace aqua {
 enum class SearchEngine { google, bing, duckduckgo };
+enum class StartupPage { new_tab, settings };
+enum class Theme { ocean, contrast };
 
 struct Preferences {
     SearchEngine search = SearchEngine::google;
+    StartupPage startup_page = StartupPage::new_tab;
+    Theme theme = Theme::ocean;
     bool restore_session = false;
+    bool limit_restored_tabs = false;
     int zoom = 100;
     std::vector<std::wstring> session;
 };

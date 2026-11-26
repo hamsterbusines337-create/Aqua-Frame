@@ -9,19 +9,30 @@
 #include <algorithm>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <shellapi.h>
+#include <shlobj.h>
 #include <windowsx.h>
 
 namespace aqua {
 namespace {
 constexpr UINT close_browser_window = WM_APP + 1;
 constexpr UINT apply_settings = WM_APP + 2;
-constexpr COLORREF background = RGB(11, 22, 40);
-constexpr COLORREF toolbar = RGB(20, 36, 58);
-constexpr COLORREF active = RGB(32, 59, 89);
-constexpr COLORREF inactive = RGB(26, 46, 69);
-constexpr COLORREF text = RGB(230, 241, 255);
-constexpr COLORREF muted = RGB(140, 160, 179);
-constexpr COLORREF accent = RGB(0, 184, 230);
+struct Palette {
+    COLORREF background, toolbar, active, inactive, text, muted, accent, border;
+};
+
+constexpr Palette ocean{RGB(11, 22, 40), RGB(20, 36, 58), RGB(32, 59, 89),
+    RGB(26, 46, 69), RGB(230, 241, 255), RGB(140, 160, 179), RGB(0, 184, 230), RGB(43, 61, 82)};
+constexpr Palette contrast{RGB(7, 16, 28), RGB(18, 36, 58), RGB(19, 76, 103),
+    RGB(25, 48, 73), RGB(255, 255, 255), RGB(210, 227, 244), RGB(85, 216, 255), RGB(102, 135, 167)};
+
+const Palette& Colors(Theme theme) {
+    return theme == Theme::contrast ? contrast : ocean;
+}
+
+bool IsSettings(std::wstring_view address) {
+    return address == L"aqua://settings" || address.starts_with(L"aqua://settings/");
+}
 
 void Fill(HDC dc, RECT area, COLORREF color) {
     SetDCBrushColor(dc, color);
@@ -68,9 +79,12 @@ bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& p
         AddTab(L"aqua://welcome/");
         if (!tabs_.empty()) DeleteFileW(marker.c_str());
     } else if (preferences_.restore_session) {
-        for (const auto& url : preferences_.session) AddTab(url);
+        const auto count = preferences_.session.size();
+        const auto first = preferences_.limit_restored_tabs && count > 8 ? count - 8 : 0;
+        for (auto i = first; i < count; ++i) AddTab(preferences_.session[i]);
     }
-    if (tabs_.empty()) AddTab();
+    if (tabs_.empty()) AddTab(preferences_.startup_page == StartupPage::settings
+        ? L"aqua://settings/" : L"aqua://newtab/");
     return !tabs_.empty();
 }
 
@@ -104,7 +118,7 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
     case WM_CREATE:
         dpi_ = GetDpiForWindow(hwnd_);
-        address_brush_ = CreateSolidBrush(background);
+        address_brush_ = CreateSolidBrush(Colors(preferences_.theme).background);
         edit_ = CreateWindowExW(0, L"EDIT", nullptr,
             WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 0, 0, 0, 0,
             hwnd_, nullptr, GetModuleHandleW(nullptr), nullptr);
@@ -133,8 +147,8 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_CTLCOLOREDIT:
-        SetTextColor(reinterpret_cast<HDC>(w), text);
-        SetBkColor(reinterpret_cast<HDC>(w), background);
+        SetTextColor(reinterpret_cast<HDC>(w), Colors(preferences_.theme).text);
+        SetBkColor(reinterpret_cast<HDC>(w), Colors(preferences_.theme).background);
         return reinterpret_cast<LRESULT>(address_brush_);
     case WM_ERASEBKGND: return 1;
     case WM_PAINT: Paint(); return 0;
@@ -229,7 +243,9 @@ void Window::Layout() {
     SendMessageW(edit_, WM_SETFONT, reinterpret_cast<WPARAM>(new_font), FALSE);
     if (font_) DeleteObject(font_);
     font_ = new_font;
-    MoveWindow(edit_, Scale(112), Scale(48), std::max(0L, r.right - Scale(171)), Scale(23), TRUE);
+    const auto* tab = Find(selected_);
+    const int address_left = Scale(tab && IsSettings(tab->url) ? 219 : 112);
+    MoveWindow(edit_, address_left, Scale(48), std::max(0L, r.right - address_left - Scale(59)), Scale(23), TRUE);
     if (auto browser = Current()) {
         if (const auto child = browser->GetHost()->GetWindowHandle())
             MoveWindow(child, 0, Scale(76), r.right, std::max(0L, r.bottom - Scale(76)), TRUE);
@@ -239,33 +255,41 @@ void Window::Layout() {
 }
 
 void Window::Paint() {
+    const auto& colors = Colors(preferences_.theme);
+    const auto* selected = Find(selected_);
     PAINTSTRUCT ps{};
     HDC dc = BeginPaint(hwnd_, &ps);
     RECT r{};
     GetClientRect(hwnd_, &r);
-    Fill(dc, ps.rcPaint, background);
+    Fill(dc, ps.rcPaint, colors.background);
     SetBkMode(dc, TRANSPARENT);
     const auto old_font = SelectObject(dc, font_);
     const auto old_brush = SelectObject(dc, GetStockObject(DC_BRUSH));
     const auto old_pen = SelectObject(dc, GetStockObject(NULL_PEN));
-    Fill(dc, {0, Scale(36), r.right, Scale(76)}, toolbar);
-    Rounded(dc, {Scale(101), Scale(42), r.right - Scale(48), Scale(71)}, Scale(8), background);
+    Fill(dc, {0, Scale(36), r.right, Scale(76)}, colors.toolbar);
+    Rounded(dc, {Scale(101), Scale(42), r.right - Scale(48), Scale(71)}, Scale(8), colors.border);
+    Rounded(dc, {Scale(102), Scale(43), r.right - Scale(49), Scale(70)}, Scale(8), colors.background);
+    if (selected && IsSettings(selected->url)) {
+        Label(dc, {Scale(113), Scale(43), Scale(130), Scale(70)}, L"A", colors.accent, DT_CENTER);
+        Label(dc, {Scale(133), Scale(43), Scale(215), Scale(70)}, L"Aqua Frame  │", colors.text, DT_END_ELLIPSIS);
+    }
     for (size_t i = 0; i < tabs_.size(); ++i) {
         RECT tab = TabBounds(i);
         const bool current = tabs_[i].id == selected_;
-        Rounded(dc, tab, Scale(8), current ? active : inactive);
+        Rounded(dc, tab, Scale(8), current ? colors.active : colors.inactive);
         RECT title = tab;
         title.left += Scale(10);
         title.right -= Scale(26);
-        Label(dc, title, tabs_[i].title, current ? text : muted, DT_END_ELLIPSIS);
-        Label(dc, {tab.right - Scale(25), tab.top, tab.right, tab.bottom}, L"×", text, DT_CENTER);
+        const auto title_text = IsSettings(tabs_[i].url) ? L"⚙  " + tabs_[i].title : tabs_[i].title;
+        Label(dc, title, title_text, current ? colors.text : colors.muted, DT_END_ELLIPSIS);
+        Label(dc, {tab.right - Scale(25), tab.top, tab.right, tab.bottom}, L"×", colors.text, DT_CENTER);
     }
     const long plus = tabs_.empty() ? Scale(8) : TabBounds(tabs_.size() - 1).right;
-    Label(dc, {plus, 0, plus + Scale(34), Scale(36)}, L"+", accent, DT_CENTER);
-    Label(dc, {Scale(6), Scale(36), Scale(38), Scale(76)}, L"←", text, DT_CENTER);
-    Label(dc, {Scale(38), Scale(36), Scale(70), Scale(76)}, L"→", text, DT_CENTER);
-    Label(dc, {Scale(70), Scale(36), Scale(102), Scale(76)}, L"↻", text, DT_CENTER);
-    Label(dc, {r.right - Scale(44), Scale(36), r.right, Scale(76)}, L"☰", text, DT_CENTER);
+    Label(dc, {plus, 0, plus + Scale(34), Scale(36)}, L"+", colors.accent, DT_CENTER);
+    Label(dc, {Scale(6), Scale(36), Scale(38), Scale(76)}, L"←", colors.text, DT_CENTER);
+    Label(dc, {Scale(38), Scale(36), Scale(70), Scale(76)}, L"→", colors.text, DT_CENTER);
+    Label(dc, {Scale(70), Scale(36), Scale(102), Scale(76)}, L"↻", colors.text, DT_CENTER);
+    Label(dc, {r.right - Scale(44), Scale(36), r.right, Scale(76)}, L"☰", colors.text, DT_CENTER);
     SelectObject(dc, old_pen);
     SelectObject(dc, old_brush);
     SelectObject(dc, old_font);
@@ -284,7 +308,8 @@ void Window::AddTab(const std::wstring& url) {
     info.SetAsChild(hwnd_, CefRect(0, Scale(76), r.right, std::max(0L, r.bottom - Scale(76))));
     info.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
     CefBrowserSettings settings;
-    settings.background_color = CefColorSetARGB(255, 11, 22, 40);
+    const auto bg = Colors(preferences_.theme).background;
+    settings.background_color = CefColorSetARGB(255, GetRValue(bg), GetGValue(bg), GetBValue(bg));
     if (!CefBrowserHost::CreateBrowser(info, new Client(*this, id), url, settings, nullptr, nullptr)) {
         tabs_.pop_back();
         Select(previous);
@@ -349,7 +374,9 @@ void Window::Select(uint64_t id) {
 void Window::AddressChanged(uint64_t id, const CefString& address) {
     auto* tab = Find(id);
     if (!tab) return;
+    const auto was_settings = IsSettings(tab->url);
     tab->url = address.ToWString();
+    if (id == selected_ && was_settings != IsSettings(tab->url)) Layout();
     if (tab->browser) ApplyZoom(tab->browser, tab->url);
     if (id == selected_ && GetFocus() != edit_)
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
@@ -462,6 +489,17 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
         OpenExtensions();
         return;
     }
+    if (action == SettingsAction::open_downloads) {
+        PWSTR folder = nullptr;
+        bool opened = false;
+        if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_Downloads, KF_FLAG_DEFAULT, nullptr, &folder))) {
+            opened = reinterpret_cast<INT_PTR>(ShellExecuteW(hwnd_, L"open", folder,
+                nullptr, nullptr, SW_SHOWNORMAL)) > 32;
+            CoTaskMemFree(folder);
+        }
+        if (!opened) MessageBoxW(hwnd_, L"Не удалось открыть папку загрузок.", L"Aqua Frame", MB_OK | MB_ICONERROR);
+        return;
+    }
     if (action == SettingsAction::factory_reset) {
         const auto confirm = MessageBoxW(hwnd_,
             L"Удалить весь локальный профиль Aqua Frame?\n\n"
@@ -487,6 +525,12 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
     case SettingsAction::zoom_100: next.zoom = 100; break;
     case SettingsAction::zoom_110: next.zoom = 110; break;
     case SettingsAction::zoom_125: next.zoom = 125; break;
+    case SettingsAction::startup_new_tab: next.startup_page = StartupPage::new_tab; break;
+    case SettingsAction::startup_settings: next.startup_page = StartupPage::settings; break;
+    case SettingsAction::theme_ocean: next.theme = Theme::ocean; break;
+    case SettingsAction::theme_contrast: next.theme = Theme::contrast; break;
+    case SettingsAction::limit_restore_on: next.limit_restored_tabs = true; break;
+    case SettingsAction::limit_restore_off: next.limit_restored_tabs = false; break;
     case SettingsAction::reset_preferences: next = Preferences{}; break;
     default: return;
     }
@@ -494,7 +538,16 @@ void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
         MessageBoxW(hwnd_, L"Не удалось сохранить настройки.", L"Aqua Frame", MB_OK | MB_ICONERROR);
         return;
     }
+    const bool theme_changed = next.theme != preferences_.theme;
     preferences_ = std::move(next);
+    if (theme_changed) {
+        const auto brush = CreateSolidBrush(Colors(preferences_.theme).background);
+        if (brush) {
+            DeleteObject(address_brush_);
+            address_brush_ = brush;
+        }
+        RedrawWindow(hwnd_, nullptr, nullptr, RDW_INVALIDATE | RDW_ALLCHILDREN);
+    }
     UpdateAquaPageSettings(preferences_);
     for (const auto& item : tabs_) {
         if (!item.browser || item.closing) continue;

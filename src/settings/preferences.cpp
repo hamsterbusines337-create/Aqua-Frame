@@ -50,7 +50,10 @@ Preferences ReadPreferences(const std::filesystem::path& profile) {
     auto search = dictionary->GetString("search").ToString();
     if (search == "Bing") result.search = SearchEngine::bing;
     if (search == "DuckDuckGo") result.search = SearchEngine::duckduckgo;
+    if (dictionary->GetString("startup_page") == "settings") result.startup_page = StartupPage::settings;
+    if (dictionary->GetString("theme") == "contrast") result.theme = Theme::contrast;
     result.restore_session = dictionary->GetBool("restore_session");
+    result.limit_restored_tabs = dictionary->GetBool("limit_restored_tabs");
     const int zoom = dictionary->GetInt("zoom");
     if (zoom == 90 || zoom == 100 || zoom == 110 || zoom == 125) result.zoom = zoom;
 
@@ -69,7 +72,10 @@ bool WritePreferences(const std::filesystem::path& profile, const Preferences& p
     auto root = CefValue::Create();
     auto dictionary = CefDictionaryValue::Create();
     dictionary->SetString("search", std::string(SearchName(preferences.search)));
+    dictionary->SetString("startup_page", preferences.startup_page == StartupPage::settings ? "settings" : "new_tab");
+    dictionary->SetString("theme", preferences.theme == Theme::contrast ? "contrast" : "ocean");
     dictionary->SetBool("restore_session", preferences.restore_session);
+    dictionary->SetBool("limit_restored_tabs", preferences.limit_restored_tabs);
     dictionary->SetInt("zoom", preferences.zoom);
     auto session = CefListValue::Create();
     if (preferences.restore_session) {

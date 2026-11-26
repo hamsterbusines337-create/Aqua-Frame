@@ -97,11 +97,20 @@ public:
         std::string page;
         if (url == "aqua://newtab/") {
             SearchEngine engine;
+            Theme theme;
             {
                 const std::scoped_lock lock(page_mutex);
                 engine = page_preferences.search;
+                theme = page_preferences.theme;
             }
             page = home;
+            if (theme == Theme::contrast) {
+                const auto style_end = page.find("</style>");
+                page.insert(style_end,
+                    ":root{background:#07101c;color:#fff}"
+                    "body{background:#07101c}"
+                    "form,nav a .shortcut{background:#12243a;border-color:#6687a7}");
+            }
             const std::string_view endpoint = "https://www.google.com/search";
             const auto at = page.find(endpoint);
             if (at != std::string::npos) page.replace(at, endpoint.size(), SearchEndpoint(engine));
@@ -132,6 +141,7 @@ public:
             {"Cache-Control", "no-store"},
             {"X-Frame-Options", "DENY"},
             {"X-Content-Type-Options", "nosniff"},
+            {"Referrer-Policy", "no-referrer"},
             {"Content-Security-Policy", policy}};
         CefRefPtr<PageBytes> storage = new PageBytes(std::move(page));
         auto reader = new CefByteReadHandler(
@@ -160,6 +170,9 @@ bool RegisterAquaPages() {
 void UpdateAquaPageSettings(const Preferences& settings) {
     const std::scoped_lock lock(page_mutex);
     page_preferences.search = settings.search;
+    page_preferences.startup_page = settings.startup_page;
+    page_preferences.theme = settings.theme;
+    page_preferences.limit_restored_tabs = settings.limit_restored_tabs;
     page_preferences.restore_session = settings.restore_session;
     page_preferences.zoom = settings.zoom;
 }
