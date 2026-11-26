@@ -127,7 +127,7 @@ function Find-Report([IntPtr]$dialog) {
         if ($position -eq $zero) { return '' }
         $message = [Text.StringBuilder]::new(1600)
         [void][AquaWindowUi]::SendMessage($position, 0x000d, [IntPtr]$message.Capacity, $message)
-        if ($message.ToString().Contains('TTFB')) { return $message.ToString() }
+        if ($message.Length -gt 10) { return $message.ToString() }
     } while ($true)
 }
 
@@ -157,14 +157,18 @@ try {
     [Windows.Forms.SendKeys]::SendWait('^+m')
     $dialog = Window-For '#32770' 'Aqua Performance' 10
     if ($dialog -eq $zero) { throw 'The navigation timing report did not open.' }
-    $report = Find-Report $dialog
-    if ($report -notmatch 'TTFB\):\s*(\d+)[.,]\d+') { throw "No first-byte timing found. Report: $report" }
-    if ([int]$Matches[1] -lt 110) { throw "The first-byte timing missed the fixture delay. Report: $report" }
-    if ($report -notmatch 'rAF\):\s*[0-9]+[.,][0-9]+' -or
-        $report -notmatch 'CPU' -or $report -notmatch 'Chromium 158') {
-        throw "The performance report is missing measured browser and page values. Report: $report"
-    }
+    Start-Sleep -Milliseconds 500
     Screenshot $dialog 'browser-timing.png'
+    $report = Find-Report $dialog
+    Write-Host "Aqua Performance report: $report"
+    if ($report -notmatch 'TTFB\):\s*(\d+)[.,]\d+') {
+        $timingError = "No first-byte timing found. Report: $report"
+    } elseif ([int]$Matches[1] -lt 110) {
+        $timingError = "The first-byte timing missed the fixture delay. Report: $report"
+    } elseif ($report -notmatch 'rAF\):\s*[0-9]+[.,][0-9]+' -or
+              $report -notmatch 'CPU' -or $report -notmatch 'Chromium 158') {
+        $timingError = "The performance report is missing measured browser and page values. Report: $report"
+    }
     [void][AquaWindowUi]::PostMessage([AquaWindowUi]::GetDlgItem($dialog, 1), 0x00f5, $zero, $zero)
     Start-Sleep -Milliseconds 500
 
@@ -209,7 +213,9 @@ try {
     Click-At $window 80 18
     Start-Sleep -Seconds 3
     if ((Request-Log) -notmatch '(?m)^/deferred\|') { throw 'Selecting a deferred tab did not load it.' }
-    Write-Host 'Verified fullscreen, navigation timing, history, bookmarks, cookie isolation, and lazy restoration.'
+    Write-Host 'Verified fullscreen, history, bookmarks, cookie isolation, and lazy restoration.'
+    if ($timingError) { throw $timingError }
+    Write-Host 'Verified measured TTFB, page frame intervals and process statistics.'
 } finally {
     if ($process -and !$process.HasExited) {
         $window = Window-For 'AquaFrame.Main' 'Aqua Frame' 1
