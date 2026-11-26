@@ -2,6 +2,7 @@
 #include "../chromium/client.h"
 #include "../navigation/address.h"
 #include "include/cef_frame.h"
+#include "include/cef_app.h"
 #include <algorithm>
 #include <commctrl.h>
 #include <dwmapi.h>

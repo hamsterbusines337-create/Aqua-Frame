@@ -1,6 +1,7 @@
 #include "address.h"
 #include <windows.h>
 #include <urlmon.h>
+#include <shlwapi.h>
 #include <wrl/client.h>
 #include <oleauto.h>
 

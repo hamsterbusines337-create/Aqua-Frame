@@ -10,8 +10,8 @@ try {
         if (!(Test-Path (Join-Path $runtime $file))) { throw "Missing runtime file: $file" }
     }
     $zip = Join-Path $dist 'AquaFrame-Portable.zip'
-    & tar.exe -a -cf $zip -C $runtime .
-    if ($LASTEXITCODE -ne 0) { throw 'ZIP creation failed.' }
+    if (Test-Path $zip) { Remove-Item -LiteralPath $zip }
+    [IO.Compression.ZipFile]::CreateFromDirectory($runtime, $zip, 'Fastest', $false)
 
     $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
     if (!(Test-Path $iscc)) { throw 'Inno Setup 6 is required for packaging.' }
