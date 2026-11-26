@@ -18,28 +18,48 @@ body{margin:0;min-height:100vh;display:grid;place-items:center;background:
 radial-gradient(ellipse 90% 60% at -10% 72%,#123254 0%,#0a1b2c 57%,transparent 58%),
 radial-gradient(ellipse 78% 54% at 108% 94%,#103155 15%,#09213b 61%,transparent 62%),#0b1628}
 main{text-align:center;width:min(580px,90vw);padding:24px}
-svg{width:76px;height:76px}h1{margin:3px 0 22px;font-size:27px}
+.brand{width:76px;height:76px}h1{margin:3px 0 22px;font-size:27px}
 form{display:flex;align-items:center;overflow:hidden;border:1px solid #2b3d52;border-radius:28px;background:#14243a;padding:0 12px}
 input{font:inherit;color:#e6f1ff;outline:none;background:transparent;border:0;padding:14px 10px;width:100%}
 form:focus-within{border-color:#00b8e6}button{font:inherit;background:transparent;border:0;color:#e6f1ff;cursor:pointer}
 nav{display:flex;justify-content:center;flex-wrap:wrap;gap:14px;margin:23px auto}
 a{display:grid;gap:7px;color:#e6f1ff;text-decoration:none;min-width:74px;font-size:13px}
-b{display:grid;place-items:center;height:47px;background:#14243a;border:1px solid #2b3d52;border-radius:8px;font-size:21px}
-a:hover b,a:focus-visible b{border-color:#7dd3fc;background:#203b59}
+.shortcut{display:grid;place-items:center;height:47px;background:#14243a;border:1px solid #2b3d52;border-radius:8px}
+.shortcut svg{display:block;width:24px;height:24px}
+a:hover .shortcut,a:focus-visible .shortcut{border-color:#7dd3fc;background:#203b59}
 p{color:#8ca0b3;font-size:13px;margin:22px 0 0}.google{color:#7dd3fc;font-weight:700}
 </style>
 <main>
-<svg viewBox="0 0 80 80" aria-hidden="true"><defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="#7dd3fc"/><stop offset="1" stop-color="#0089c4"/></linearGradient></defs><path fill="url(#a)" d="M36 8h10l29 61H60L40 25l-9 21 14 2 6 12-25-3-6 12H5z"/><path fill="#00b8e6" d="m36 8 4 17 6-17z"/></svg>
+<svg class="brand" viewBox="0 0 80 80" aria-hidden="true"><defs><linearGradient id="a" x2="1" y2="1"><stop stop-color="#7dd3fc"/><stop offset="1" stop-color="#0089c4"/></linearGradient></defs><path fill="url(#a)" d="M36 8h10l29 61H60L40 25l-9 21 14 2 6 12-25-3-6 12H5z"/><path fill="#00b8e6" d="m36 8 4 17 6-17z"/></svg>
 <h1>Aqua Frame</h1>
 <form action="https://www.google.com/search" method="get">
 <span class="google" aria-hidden="true">G</span><input name="q" type="search" aria-label="Поиск в Google" placeholder="Поиск в Google" required>
 <button aria-label="Искать">⌕</button>
 </form>
 <nav aria-label="Быстрые ссылки">
-<a href="https://www.youtube.com/"><b aria-hidden="true">▶</b>YouTube</a>
-<a href="https://www.chess.com/"><b aria-hidden="true">♟</b>Chess.com</a>
-<a href="https://lichess.org/"><b aria-hidden="true">♘</b>Lichess</a>
-<a href="https://github.com/"><b aria-hidden="true">&lt;/&gt;</b>GitHub</a>
+<a href="https://www.youtube.com/">
+  <span class="shortcut" aria-hidden="true"><svg viewBox="0 0 32 32">
+    <path fill="#ff0033" d="M16 5c-4 0-10.9 0-12.9 1.4C1 7.9 1 11.5 1 16s0 8.1 2.1 9.6C5.1 27 12 27 16 27s10.9 0 12.9-1.4C31 24.1 31 20.5 31 16s0-8.1-2.1-9.6C26.9 5 20 5 16 5z"/>
+    <path fill="#fff" d="M13 11.5v9l8-4.5z"/>
+  </svg></span>YouTube
+</a>
+<a href="https://www.chess.com/">
+  <span class="shortcut" aria-hidden="true"><svg viewBox="0 0 32 32">
+    <path fill="#5c843e" d="M16 1a5 5 0 0 0-3 9l-3.5 2.5.5 2h3.3c0 4-1.8 6-4.1 8.1C6.9 24.7 6 27 6 30c2.8 2 17.2 2 20 0 0-3-.9-5.3-3.2-7.4-2.3-2.1-4.1-4.1-4.1-8.1H22l.5-2L19 10a5 5 0 0 0-3-9z"/>
+    <path fill="#81aa50" d="M16 1a5 5 0 0 0-3 9l-3.5 2.5.5 2h8l.4-2-2-2.5A5 5 0 0 0 16 1zm-2.7 14.7c0 3.2-1.8 5-4.1 6.9a9 9 0 0 0-2.8 4.3c3.4 1 8.4 1.5 9.6-1.1.8-1.7.9-4.6 1.7-7.8.3-1.1-1.7-2.1-4.4-2.3z"/>
+    <ellipse cx="14.6" cy="3.8" rx="2.4" ry="1.2" fill="#a2c66a" transform="rotate(-40 14.6 3.8)"/>
+  </svg></span>Chess.com
+</a>
+<a href="https://lichess.org/">
+  <span class="shortcut" aria-hidden="true"><svg viewBox="0 0 50 50">
+    <path fill="#fff" stroke="#fff" stroke-linejoin="round" d="M38.956.5c-3.53.418-6.452.902-9.286 2.984C5.534 1.786-.692 18.533.68 29.364 3.493 50.214 31.918 55.785 41.329 41.7c-7.444 7.696-19.276 8.752-28.323 3.084S-.506 27.392 4.683 17.567C9.873 7.742 18.996 4.535 29.03 6.405c2.43-1.418 5.225-3.22 7.655-3.187l-1.694 4.86 12.752 21.37c-.439 5.654-5.459 6.112-5.459 6.112-.574-1.47-1.634-2.942-4.842-6.036-3.207-3.094-17.465-10.177-15.788-16.207-2.001 6.967 10.311 14.152 14.04 17.663 3.73 3.51 5.426 6.04 5.795 6.756 0 0 9.392-2.504 7.838-8.927L37.4 7.171z"/>
+  </svg></span>Lichess
+</a>
+<a href="https://github.com/">
+  <span class="shortcut" aria-hidden="true"><svg viewBox="0 0 24 24">
+    <path fill="#fff" d="M10.226 17.284c-2.965-.36-5.054-2.493-5.054-5.256 0-1.123.404-2.336 1.078-3.144-.292-.741-.247-2.314.09-2.965.898-.112 2.111.36 2.83 1.01.853-.269 1.752-.404 2.853-.404 1.1 0 1.999.135 2.807.382.696-.629 1.932-1.1 2.83-.988.315.606.36 2.179.067 2.942.72.854 1.101 2 1.101 3.167 0 2.763-2.089 4.852-5.098 5.234.763.494 1.28 1.572 1.28 2.807v2.336c0 .674.561 1.056 1.235.786 4.066-1.55 7.255-5.615 7.255-10.646C23.5 6.188 18.334 1 11.978 1 5.62 1 .5 6.188.5 12.545c0 4.986 3.167 9.12 7.435 10.669.606.225 1.19-.18 1.19-.786V20.63a2.9 2.9 0 0 1-1.078.224c-1.483 0-2.359-.808-2.987-2.313-.247-.607-.517-.966-1.034-1.033-.27-.023-.359-.135-.359-.27 0-.27.45-.471.898-.471.652 0 1.213.404 1.797 1.235.45.651.921.943 1.483.943.561 0 .92-.202 1.437-.719.382-.381.674-.718.944-.943"/>
+  </svg></span>GitHub
+</a>
 </nav></main></html>)HTML";
 
 class Pages final : public CefSchemeHandlerFactory {
