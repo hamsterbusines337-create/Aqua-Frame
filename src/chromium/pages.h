@@ -9,6 +9,7 @@ void RegisterAquaScheme(CefRawPtr<CefSchemeRegistrar> registrar);
 bool RegisterAquaPages(CefRefPtr<CefRequestContext> context = nullptr);
 void UpdateAquaPageSettings(const Preferences& settings);
 void UpdateAquaScriptList(const std::vector<Script>& scripts);
-void UpdateAquaLibrary(const std::vector<PageEntry>& history, const std::vector<PageEntry>& bookmarks,
-                       const std::vector<DownloadEntry>& downloads);
+void UpdateAquaHistory(const std::vector<PageEntry>& history);
+void UpdateAquaBookmarks(const std::vector<PageEntry>& bookmarks);
+void UpdateAquaDownloads(const std::vector<DownloadEntry>& downloads);
 }

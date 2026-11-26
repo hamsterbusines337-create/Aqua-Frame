@@ -7,6 +7,7 @@
 #include "include/cef_browser.h"
 #include <windows.h>
 #include <cstdint>
+#include <future>
 #include <map>
 #include <optional>
 #include <string>
@@ -49,6 +50,7 @@ private:
         bool deferred = false;
         bool pinned = false;
         unsigned group = 0;
+        bool unloading = false;
     };
 
     static LRESULT CALLBACK Procedure(HWND, UINT, WPARAM, LPARAM);
@@ -58,6 +60,9 @@ private:
     bool StartTab(Tab& tab);
     void Paint();
     void CloseTab(uint64_t id, bool force);
+    bool CanUnloadTab(const Tab& tab) const;
+    void UnloadTab(uint64_t id);
+    void WarmRestoredTab();
     void Select(uint64_t id);
     void Navigate();
     void Menu();
@@ -76,13 +81,17 @@ private:
     void ToggleFullscreen();
     void MeasureNavigation();
     void ShowNavigationTiming(uint64_t tab);
-    void RefreshLibrary();
+    void RefreshDownloads();
     void RunDownloadAction(uint64_t tab);
     void ScheduleHistorySave();
+    void WriteHistoryInBackground();
+    void FinishHistoryWrite();
+    bool SavePreferences(const Preferences& snapshot);
     void ConfirmSitePermission();
     int ContentTop();
     void ApplyZoom(const CefRefPtr<CefBrowser>& browser, std::wstring_view url);
     RECT TabBounds(size_t index) const;
+    RECT TabBounds(size_t index, long viewport_width) const;
     Tab* Find(uint64_t id);
     CefRefPtr<CefBrowser> Current();
     int Scale(int value) const;
@@ -121,6 +130,9 @@ private:
     std::optional<SitePermission> permission_;
     bool permission_open_ = false;
     bool history_dirty_ = false;
+    std::future<bool> history_write_;
+    uint64_t restore_foreground_ = 0;
+    uint64_t restore_warm_tab_ = 0;
     bool bookmark_bar_ = false;
     WINDOWPLACEMENT windowed_{sizeof(WINDOWPLACEMENT)};
     bool fullscreen_ = false;

@@ -79,6 +79,9 @@ Preferences ReadPreferences(const std::filesystem::path& profile) {
     if (dictionary->GetString("theme") == "contrast") result.theme = Theme::contrast;
     result.restore_session = dictionary->GetBool("restore_session");
     result.limit_restored_tabs = dictionary->GetBool("limit_restored_tabs");
+    result.warm_restored_tab = dictionary->GetBool("warm_restored_tab");
+    result.allow_tab_unload = !dictionary->HasKey("allow_tab_unload") ||
+        dictionary->GetBool("allow_tab_unload");
     result.animations = !dictionary->HasKey("animations") || dictionary->GetBool("animations");
     result.https_only = dictionary->GetBool("https_only");
     result.history = ReadEntries(dictionary, "history");
@@ -105,6 +108,8 @@ bool WritePreferences(const std::filesystem::path& profile, const Preferences& p
     dictionary->SetString("theme", preferences.theme == Theme::contrast ? "contrast" : "ocean");
     dictionary->SetBool("restore_session", preferences.restore_session);
     dictionary->SetBool("limit_restored_tabs", preferences.limit_restored_tabs);
+    dictionary->SetBool("warm_restored_tab", preferences.warm_restored_tab);
+    dictionary->SetBool("allow_tab_unload", preferences.allow_tab_unload);
     dictionary->SetInt("zoom", preferences.zoom);
     dictionary->SetBool("animations", preferences.animations);
     dictionary->SetBool("https_only", preferences.https_only);

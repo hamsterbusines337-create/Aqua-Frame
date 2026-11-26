@@ -219,17 +219,27 @@ void UpdateAquaPageSettings(const Preferences& settings) {
     page_preferences.startup_page = settings.startup_page;
     page_preferences.theme = settings.theme;
     page_preferences.limit_restored_tabs = settings.limit_restored_tabs;
+    page_preferences.warm_restored_tab = settings.warm_restored_tab;
+    page_preferences.allow_tab_unload = settings.allow_tab_unload;
     page_preferences.restore_session = settings.restore_session;
     page_preferences.zoom = settings.zoom;
     page_preferences.animations = settings.animations;
     page_preferences.https_only = settings.https_only;
 }
-void UpdateAquaLibrary(const std::vector<PageEntry>& history, const std::vector<PageEntry>& bookmarks,
-                       const std::vector<DownloadEntry>& downloads) {
+void UpdateAquaHistory(const std::vector<PageEntry>& history) {
+    auto snapshot = history;
     const std::scoped_lock lock(page_mutex);
-    page_history = history;
-    page_bookmarks = bookmarks;
-    page_downloads = downloads;
+    page_history.swap(snapshot);
+}
+void UpdateAquaBookmarks(const std::vector<PageEntry>& bookmarks) {
+    auto snapshot = bookmarks;
+    const std::scoped_lock lock(page_mutex);
+    page_bookmarks.swap(snapshot);
+}
+void UpdateAquaDownloads(const std::vector<DownloadEntry>& downloads) {
+    auto snapshot = downloads;
+    const std::scoped_lock lock(page_mutex);
+    page_downloads.swap(snapshot);
 }
 void UpdateAquaScriptList(const std::vector<Script>& scripts) {
     const std::scoped_lock lock(page_mutex);

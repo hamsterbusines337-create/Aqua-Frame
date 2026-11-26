@@ -19,6 +19,8 @@ constexpr std::array actions{
     std::pair{"startup-new-tab", Action::startup_new_tab}, std::pair{"startup-settings", Action::startup_settings},
     std::pair{"theme-ocean", Action::theme_ocean}, std::pair{"theme-contrast", Action::theme_contrast},
     std::pair{"limit-restore-on", Action::limit_restore_on}, std::pair{"limit-restore-off", Action::limit_restore_off},
+    std::pair{"warm-restore-on", Action::warm_restore_on}, std::pair{"warm-restore-off", Action::warm_restore_off},
+    std::pair{"tab-unload-on", Action::tab_unload_on}, std::pair{"tab-unload-off", Action::tab_unload_off},
     std::pair{"downloads", Action::open_downloads},
     std::pair{"clear-history", Action::clear_history},
     std::pair{"animations-on", Action::animations_on}, std::pair{"animations-off", Action::animations_off},
@@ -175,6 +177,11 @@ std::string RenderSettings(const Preferences& settings, const std::vector<Script
 <section id="performance"><h2>Производительность</h2><div class="card"><h3>Восстановление вкладок</h3>
 <p>При восстановлении сессии можно ограничить число вкладок, загружаемых при запуске.</p>)HTML";
     html += Switch("Открывать только восемь последних вкладок", "limit-restore-on", "limit-restore-off", settings.limit_restored_tabs);
+    html += Switch("Заранее загружать одну вкладку после восстановления", "warm-restore-on", "warm-restore-off", settings.warm_restored_tab);
+    html += R"HTML(<p>После открытия активной вкладки браузер может заранее загрузить одну соседнюю. Остальные загрузятся при выборе.</p></div>
+<div class="card"><h3>Оперативная память</h3>
+<p>Выгруженная вкладка остаётся в списке и открывается заново при выборе. Используйте команду из меню фоновой вкладки, когда на ней нет важных задач или несохранённых данных.</p>)HTML";
+    html += Switch("Разрешить ручную выгрузку фоновых вкладок", "tab-unload-on", "tab-unload-off", settings.allow_tab_unload);
     html += R"HTML(</div></section><section id="extensions"><h2>Расширения</h2><div class="card">)HTML";
     html += Link("extensions", "Открыть менеджер");
     html += R"HTML(</div></section>
