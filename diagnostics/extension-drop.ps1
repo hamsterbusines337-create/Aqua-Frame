@@ -39,38 +39,54 @@ public static class DropFixture {
     [DllImport("user32.dll")] public static extern void mouse_event(uint flags, int dx, int dy, uint data, UIntPtr extra);
     [StructLayout(LayoutKind.Sequential)] public struct Rect { public int Left, Top, Right, Bottom; }
 
-    public static DragDropEffects Drag(string path, int x, int y) {
-        DragDropEffects result = DragDropEffects.None;
-        using (var form = new Form()) {
-            form.Text = "Aqua Frame drag fixture source";
-            form.StartPosition = FormStartPosition.Manual;
-            form.Location = new Point(3, 3);
-            form.ClientSize = new Size(110, 48);
-            form.TopMost = true;
-            using (var start = new Timer { Interval = 500 }) {
-                start.Tick += (sender, args) => {
-                    start.Stop();
-                    var source = form.PointToScreen(new Point(45, 24));
-                    SetCursorPos(source.X, source.Y);
-                    mouse_event(2, 0, 0, 0, UIntPtr.Zero);
-                    var data = new DataObject();
-                    data.SetData(DataFormats.FileDrop, new[] { path });
-                    using (var movement = new System.Threading.Timer(_ => {
-                        SetCursorPos(x, y);
-                        System.Threading.Thread.Sleep(850);
-                        mouse_event(4, 0, 0, 0, UIntPtr.Zero);
-                    }, null, 500, System.Threading.Timeout.Infinite)) {
-                        result = form.DoDragDrop(data, DragDropEffects.Copy);
-                    }
-                    mouse_event(4, 0, 0, 0, UIntPtr.Zero);
-                    form.Close();
-                };
-                form.Shown += (sender, args) => { form.Activate(); start.Start(); };
-                Application.Run(form);
-            }
-        }
-        return result;
+    [ComVisible(true)]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    [Guid("00000121-0000-0000-C000-000000000046")]
+    public interface IDropSource {
+        [PreserveSig] int QueryContinueDrag([MarshalAs(UnmanagedType.Bool)] bool escape, uint keyState);
+        [PreserveSig] int GiveFeedback(uint effect);
     }
+
+    [ComVisible(true)]
+    [ClassInterface(ClassInterfaceType.None)]
+    public sealed class TestDropSource : IDropSource {
+        public volatile bool Drop;
+        public int QueryContinueDrag(bool escape, uint keyState) {
+            return escape ? 0x00040101 : Drop ? 0x00040100 : 0;
+        }
+        public int GiveFeedback(uint effect) { return 0x00040102; }
+    }
+
+    [DllImport("ole32.dll")]
+    private static extern int OleInitialize(IntPtr reserved);
+    [DllImport("ole32.dll")]
+    private static extern void OleUninitialize();
+    [DllImport("ole32.dll")]
+    private static extern int DoDragDrop(System.Runtime.InteropServices.ComTypes.IDataObject data,
+        IDropSource source, uint allowed, out uint effect);
+
+    public static string Drag(string path, int x, int y) {
+        var data = new DataObject();
+        data.SetData(DataFormats.FileDrop, new[] { path });
+        var source = new TestDropSource();
+        int init = OleInitialize(IntPtr.Zero);
+        if (init < 0) Marshal.ThrowExceptionForHR(init);
+        try {
+            SetCursorPos(x - 80, y - 80);
+            using (var motion = new System.Threading.Timer(_ => {
+                SetCursorPos(x, y);
+                System.Threading.Thread.Sleep(800);
+                source.Drop = true;
+                SetCursorPos(x + 1, y);
+                mouse_event(4, 0, 0, 0, UIntPtr.Zero);
+            }, null, 600, System.Threading.Timeout.Infinite)) {
+                uint effect;
+                int status = DoDragDrop(data, source, 1, out effect);
+                return "HRESULT=0x" + status.ToString("X") + " effect=" + effect;
+            }
+        } finally { OleUninitialize(); }
+    }
+
 }
 '@
 [void][DropFixture]::SetProcessDPIAware()
