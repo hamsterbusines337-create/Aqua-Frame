@@ -2,7 +2,7 @@ name: Aqua Frame performance screenshot
 on:
   push:
     branches: [codex/aqua-screenshot]
-    paths: ['.github/workflows/windows-performance-screenshot.yml', 'diagnostics/capture-performance.ps1']
+    paths: ['.github/workflows/windows-performance-screenshot.yml', 'diagnostics/performance-check.ps1']
 permissions:
   actions: read
   contents: read
@@ -19,18 +19,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 45891171135 --repo "${{ github.repository }}" --interval 12 --exit-status
+          gh run watch 45894222524 --repo "${{ github.repository }}" --interval 12 --exit-status
           if ($LASTEXITCODE -ne 0) { throw 'The Windows build failed.' }
-          gh run download 45891171135 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          gh run download 45894222524 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
           if ($LASTEXITCODE -ne 0) { throw 'Could not download runtime.' }
           icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
           if ($LASTEXITCODE -ne 0) { throw 'Could not set sandbox ACLs.' }
-      - name: Capture the Performance settings page
+      - name: Verify performance controls and capture the Windows interface
         shell: pwsh
-        run: ./diagnostics/capture-performance.ps1
+        run: ./diagnostics/performance-check.ps1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
           name: AquaFrame-Performance-Screenshot
-          path: AquaFrame-Performance-Settings.png
+          path: AquaFrame-Performance-*.png
           if-no-files-found: error

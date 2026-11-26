@@ -1,3 +1,4 @@
+param([switch]$HelpersOnly)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This test needs a disposable GitHub Actions runner.' }
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
@@ -144,6 +145,8 @@ function Wait-Request([string]$expected) {
     } while ((Get-Date) -lt $deadline)
     throw "No HTTP request matching $expected. Observed: $log"
 }
+
+if ($HelpersOnly) { return }
 
 $port = 39176
 $site = "http://127.0.0.1:$port"
