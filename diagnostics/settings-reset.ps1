@@ -110,6 +110,10 @@ $external = Join-Path (Split-Path (Split-Path $profile)) 'aqua-outside-reset.txt
 $preferences = Join-Path $profile 'aqua-settings.json'
 Set-Content -Path $fixture -Value 'inside the disposable profile'
 Set-Content -Path $external -Value 'outside the disposable profile'
+$outside = Join-Path $env:RUNNER_TEMP 'aqua-reset-junction-target'
+New-Item -ItemType Directory -Path $outside | Out-Null
+Set-Content -Path (Join-Path $outside 'keep.txt') -Value 'this target is not part of the profile'
+New-Item -ItemType Junction -Path (Join-Path $profile 'outside-link') -Target $outside | Out-Null
 Set-Content -Path $preferences -Value '{"search":"Bing","zoom":125,"restore_session":false,"session":[]}'
 
 $exe = Join-Path $PWD 'runtime/AquaFrame.exe'
@@ -121,21 +125,53 @@ try {
     Start-Sleep -Seconds 3
     Open-Address $window 'aqua://settings/'
     Screenshot $window 'settings-general.png'
+    Click-At $window 475 374
+    Start-Sleep -Seconds 1
+    if ((Get-Content $preferences -Raw | ConvertFrom-Json).search -ne 'DuckDuckGo') {
+        throw 'Selecting a search provider did not persist its setting.'
+    }
+    Click-At $window 580 236
+    Start-Sleep -Seconds 1
+    if (!(Get-Content $preferences -Raw | ConvertFrom-Json).restore_session) {
+        throw 'Session restore did not persist its setting.'
+    }
+    Open-Address $window 'aqua settings fixture'
+    if ((Get-Address $window) -notlike 'https://duckduckgo.com/?q=*') {
+        throw 'The selected search engine was not used for the address bar.'
+    }
+    Open-Address $window 'aqua://settings/#appearance'
+    Click-At $window 500 236
+    Start-Sleep -Seconds 1
+    if ((Get-Content $preferences -Raw | ConvertFrom-Json).zoom -ne 125) {
+        throw 'The selected page zoom was not saved.'
+    }
     Open-Address $window 'aqua://settings/#reset'
     if ((Get-Address $window) -ne 'aqua://settings/#reset') { throw 'The reset settings did not open.' }
     Screenshot $window 'settings-reset.png'
+    Click-At $window 350 227
+    Start-Sleep -Seconds 1
+    $defaults = Get-Content $preferences -Raw | ConvertFrom-Json
+    if ($defaults.search -ne 'Google' -or $defaults.zoom -ne 100 -or $defaults.restore_session -or
+        !(Test-Path $fixture)) { throw 'The ordinary reset failed to restore preferences or preserved data.' }
     Confirm-Reset $window 7
     if (!(Test-Path $fixture) -or $process.HasExited) { throw 'Cancelling reset wiped data or closed Aqua Frame.' }
 
     Confirm-Reset $window 6
     if (!$process.WaitForExit(30000) -or $process.ExitCode -ne 0) { throw 'The browser did not exit cleanly after confirmation.' }
     $window = Window-For 'AquaFrame.Main' 'Aqua Frame' 40
-    if ($window -eq $zero) { throw 'Aqua Frame did not restart.' }
+    if ($window -eq $zero) {
+        $failure = Window-For '#32770' 'Сброс Aqua Frame' 1
+        if ($failure -ne $zero) { Screenshot $failure 'settings-reset-error.png' }
+        Get-ChildItem -LiteralPath (Split-Path $profile) -Force | Select-Object Name | Write-Host
+        Get-Process -Name AquaFrame,AquaFrameReset -ErrorAction SilentlyContinue | Select-Object Name,Id | Write-Host
+        throw 'Aqua Frame did not restart.'
+    }
     Position $window
     Start-Sleep -Seconds 3
     Screenshot $window 'settings-welcome.png'
     if ((Get-Address $window) -ne 'aqua://welcome/') { throw 'The first-run page did not open after reset.' }
-    if ((Test-Path $fixture) -or (Test-Path $preferences) -or !(Test-Path $external)) {
+    if ((Test-Path $fixture) -or (Test-Path $preferences) -or !(Test-Path $external) -or
+        !(Test-Path (Join-Path $outside 'keep.txt'))) {
         throw 'Reset did not remove the profile fixture and preserve the external file.'
     }
     Write-Host 'Cancelled and confirmed reset through the Windows UI. Profile cleared and first-run page opened.'
