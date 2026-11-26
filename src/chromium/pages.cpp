@@ -1,16 +1,19 @@
 #include "pages.h"
+#include "../settings/page.h"
 #include "include/cef_request.h"
 #include "include/cef_scheme.h"
 #include "include/cef_stream.h"
 #include "include/wrapper/cef_stream_resource_handler.h"
-#include <cstring>
+#include "include/wrapper/cef_byte_read_handler.h"
+
+#include <mutex>
 
 namespace aqua {
 namespace {
 constexpr char home[] = R"HTML(<!doctype html>
 <html lang="ru"><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action https://www.google.com; base-uri 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; form-action https://www.google.com https://www.bing.com https://duckduckgo.com; base-uri 'none'">
 <title>Новая вкладка</title>
 <style>
 :root{color-scheme:dark;background:#0b1628;color:#e6f1ff;font:16px 'Segoe UI',sans-serif}
@@ -62,22 +65,84 @@ p{color:#8ca0b3;font-size:13px;margin:22px 0 0}.google{color:#7dd3fc;font-weight
 </a>
 </nav></main></html>)HTML";
 
+constexpr auto welcome = R"HTML(<!doctype html><html lang="ru"><meta charset="utf-8">
+<title>Добро пожаловать в Aqua Frame</title>
+<style>
+:root{font:16px 'Segoe UI',sans-serif;background:#0b1628;color:#e6f1ff}
+body{min-height:100vh;margin:0;display:grid;place-items:center;text-align:center}
+main{padding:36px;background:#14243a;border:1px solid #2b3d52;border-radius:8px}
+a{color:#7dd3fc}
+</style><main><h1>Добро пожаловать в Aqua Frame</h1><p>Создан чистый профиль браузера.</p>
+<a href="aqua://newtab/">Открыть главную страницу</a>
+</main></html>)HTML";
+
+std::mutex page_mutex;
+Preferences page_preferences;
+
+class PageBytes final : public CefBaseRefCounted {
+public:
+    explicit PageBytes(std::string value) : text(std::move(value)) {}
+    const std::string text;
+private:
+    IMPLEMENT_REFCOUNTING(PageBytes);
+};
+
 class Pages final : public CefSchemeHandlerFactory {
 public:
     CefRefPtr<CefResourceHandler> Create(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
         const CefString&, CefRefPtr<CefRequest> request) override {
-        if (request->GetMethod() != "GET" || request->GetURL() != "aqua://newtab/")
+        if (request->GetMethod() != "GET") return nullptr;
+
+        const auto url = request->GetURL().ToString();
+        std::string page;
+        if (url == "aqua://newtab/") {
+            SearchEngine engine;
+            {
+                const std::scoped_lock lock(page_mutex);
+                engine = page_preferences.search;
+            }
+            page = home;
+            const std::string_view endpoint = "https://www.google.com/search";
+            const auto at = page.find(endpoint);
+            if (at != std::string::npos) page.replace(at, endpoint.size(), SearchEndpoint(engine));
+            if (engine != SearchEngine::google) {
+                constexpr std::string_view label = "Поиск в Google";
+                auto match = page.find(label);
+                while (match != std::string::npos) {
+                    const auto replacement = "Поиск · " + std::string(SearchName(engine));
+                    page.replace(match, label.size(), replacement);
+                    match = page.find(label, match + replacement.size());
+                }
+                const auto badge = page.find(">G</span>");
+                if (badge != std::string::npos)
+                    page[badge + 1] = SearchName(engine).front();
+            }
+        } else if (url == "aqua://settings/" || url.starts_with("aqua://settings/#")) {
+            const std::scoped_lock lock(page_mutex);
+            page = RenderSettings(page_preferences);
+        } else if (url == "aqua://welcome/") {
+            page = welcome;
+        } else {
             return nullptr;
+        }
+        const auto policy = url == "aqua://newtab/"
+            ? "frame-ancestors 'none'"
+            : "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
         CefResponse::HeaderMap headers{
+            {"Cache-Control", "no-store"},
             {"X-Frame-Options", "DENY"},
             {"X-Content-Type-Options", "nosniff"},
-            {"Content-Security-Policy", "frame-ancestors 'none'"}};
-        auto stream = CefStreamReader::CreateForData(const_cast<char*>(home), sizeof(home) - 1);
-        return new CefStreamResourceHandler(200, "OK", "text/html", headers, stream);
+            {"Content-Security-Policy", policy}};
+        CefRefPtr<PageBytes> storage = new PageBytes(std::move(page));
+        auto reader = new CefByteReadHandler(
+            reinterpret_cast<const unsigned char*>(storage->text.data()), storage->text.size(), storage);
+        return new CefStreamResourceHandler(200, "OK", "text/html", headers,
+                                            CefStreamReader::CreateForHandler(reader));
     }
 private:
     IMPLEMENT_REFCOUNTING(Pages);
 };
+
 }
 
 void RegisterAquaScheme(CefRawPtr<CefSchemeRegistrar> registrar) {
@@ -86,6 +151,16 @@ void RegisterAquaScheme(CefRawPtr<CefSchemeRegistrar> registrar) {
 }
 
 bool RegisterAquaPages() {
-    return CefRegisterSchemeHandlerFactory("aqua", "newtab", new Pages());
+    auto pages = CefRefPtr<Pages>(new Pages());
+    return CefRegisterSchemeHandlerFactory("aqua", "newtab", pages) &&
+           CefRegisterSchemeHandlerFactory("aqua", "settings", pages) &&
+           CefRegisterSchemeHandlerFactory("aqua", "welcome", pages);
+}
+
+void UpdateAquaPageSettings(const Preferences& settings) {
+    const std::scoped_lock lock(page_mutex);
+    page_preferences.search = settings.search;
+    page_preferences.restore_session = settings.restore_session;
+    page_preferences.zoom = settings.zoom;
 }
 }

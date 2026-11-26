@@ -1,5 +1,8 @@
 #include "window.h"
 #include "../chromium/client.h"
+#include "../chromium/pages.h"
+#include "../reset/cleanup.h"
+#include <cmath>
 #include "../navigation/address.h"
 #include "include/cef_frame.h"
 #include "include/cef_app.h"
@@ -11,6 +14,7 @@
 namespace aqua {
 namespace {
 constexpr UINT close_browser_window = WM_APP + 1;
+constexpr UINT apply_settings = WM_APP + 2;
 constexpr COLORREF background = RGB(11, 22, 40);
 constexpr COLORREF toolbar = RGB(20, 36, 58);
 constexpr COLORREF active = RGB(32, 59, 89);
@@ -36,7 +40,10 @@ void Label(HDC dc, RECT area, const std::wstring& value, COLORREF color, UINT fl
 }
 }
 
-bool Window::Create(HINSTANCE instance, int show) {
+bool Window::Create(HINSTANCE instance, int show, const std::filesystem::path& profile) {
+    profile_ = profile;
+    preferences_ = ReadPreferences(profile_);
+    UpdateAquaPageSettings(preferences_);
     WNDCLASSW wc{};
     wc.hInstance = instance;
     wc.lpfnWndProc = Procedure;
@@ -56,7 +63,14 @@ bool Window::Create(HINSTANCE instance, int show) {
     DwmSetWindowAttribute(hwnd_, 20, &dark, sizeof(dark));
     extensions_ = new ExtensionManager(hwnd_, [this](const std::wstring& url) { AddTab(url); });
     ShowWindow(hwnd_, show);
-    AddTab();
+    const auto marker = profile_ / first_run_marker;
+    if (GetFileAttributesW(marker.c_str()) != INVALID_FILE_ATTRIBUTES) {
+        AddTab(L"aqua://welcome/");
+        if (!tabs_.empty()) DeleteFileW(marker.c_str());
+    } else if (preferences_.restore_session) {
+        for (const auto& url : preferences_.session) AddTab(url);
+    }
+    if (tabs_.empty()) AddTab();
     return !tabs_.empty();
 }
 
@@ -157,8 +171,12 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
             if (child && IsChild(hwnd_, child)) DestroyWindow(child);
         }
         return 0;
+    case apply_settings:
+        ApplySettingsAction(static_cast<uint64_t>(w), static_cast<SettingsAction>(l));
+        return 0;
     case WM_CLOSE:
         if (!exiting_) {
+            if (!reset_requested_) SaveSession();
             exiting_ = true;
             extensions_->Close();
 
@@ -280,6 +298,7 @@ void Window::BrowserCreated(uint64_t id, CefRefPtr<CefBrowser> browser) {
         return;
     }
     tab->browser = browser;
+    ApplyZoom(browser, tab->url);
     if (tab->closing) {
         browser->GetHost()->CloseBrowser(true);
         return;
@@ -331,6 +350,7 @@ void Window::AddressChanged(uint64_t id, const CefString& address) {
     auto* tab = Find(id);
     if (!tab) return;
     tab->url = address.ToWString();
+    if (tab->browser) ApplyZoom(tab->browser, tab->url);
     if (id == selected_ && GetFocus() != edit_)
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
 }
@@ -355,7 +375,13 @@ void Window::Navigate() {
     }
     auto browser = Current();
     if (!browser) return;
-    const auto url = ResolveAddress(address);
+    if (address == L"aqua://settings" || address == L"aqua://settings/" ||
+        address.starts_with(L"aqua://settings/#")) {
+        browser->GetHost()->SetFocus(true);
+        browser->GetMainFrame()->LoadURL(address == L"aqua://settings" ? L"aqua://settings/" : address);
+        return;
+    }
+    const auto url = ResolveAddress(address, preferences_.search);
     if (url.empty()) return;
     SetWindowTextW(edit_, url.c_str());
     browser->GetHost()->SetFocus(true);
@@ -406,12 +432,85 @@ void Window::OpenExtensions() {
     }
 }
 
+void Window::QueueSettingsAction(uint64_t tab, SettingsAction action) {
+    PostMessageW(hwnd_, apply_settings, static_cast<WPARAM>(tab), static_cast<LPARAM>(action));
+}
+
+void Window::ApplyZoom(const CefRefPtr<CefBrowser>& browser, std::wstring_view url) {
+    const bool local = url.starts_with(L"aqua://");
+    const auto zoom = local ? 0 : std::log(preferences_.zoom / 100.0) / std::log(1.2);
+    browser->GetHost()->SetZoomLevel(zoom);
+}
+
+void Window::SaveSession() {
+    if (!preferences_.restore_session) return;
+    preferences_.session.clear();
+    for (const auto& tab : tabs_) {
+        if (!tab.closing && !tab.url.empty() && IsSessionAddress(tab.url))
+            preferences_.session.push_back(tab.url);
+    }
+    if (!WritePreferences(profile_, preferences_))
+        MessageBoxW(hwnd_, L"Не удалось сохранить открытые вкладки.", L"Aqua Frame", MB_OK | MB_ICONWARNING);
+}
+
+void Window::ApplySettingsAction(uint64_t id, SettingsAction action) {
+    const auto* tab = Find(id);
+    if (exiting_ || !tab || id != selected_ || !tab->browser || tab->closing ||
+        !(tab->url == L"aqua://settings/" || tab->url.starts_with(L"aqua://settings/#"))) return;
+
+    if (action == SettingsAction::open_extensions) {
+        OpenExtensions();
+        return;
+    }
+    if (action == SettingsAction::factory_reset) {
+        const auto confirm = MessageBoxW(hwnd_,
+            L"Удалить весь локальный профиль Aqua Frame?\n\n"
+            L"История, авторизации, данные сайтов, расширения, пароли и настройки будут удалены. "
+            L"Файлы в папке загрузок сохранятся. Это действие необратимо.\n\n"
+            L"Браузер автоматически перезапустится.",
+            L"Полный заводской сброс Aqua Frame", MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING);
+        if (confirm == IDYES) {
+            reset_requested_ = true;
+            PostMessageW(hwnd_, WM_CLOSE, 0, 0);
+        }
+        return;
+    }
+
+    auto next = preferences_;
+    switch (action) {
+    case SettingsAction::restore_on: next.restore_session = true; break;
+    case SettingsAction::restore_off: next.restore_session = false; next.session.clear(); break;
+    case SettingsAction::google: next.search = SearchEngine::google; break;
+    case SettingsAction::bing: next.search = SearchEngine::bing; break;
+    case SettingsAction::duckduckgo: next.search = SearchEngine::duckduckgo; break;
+    case SettingsAction::zoom_90: next.zoom = 90; break;
+    case SettingsAction::zoom_100: next.zoom = 100; break;
+    case SettingsAction::zoom_110: next.zoom = 110; break;
+    case SettingsAction::zoom_125: next.zoom = 125; break;
+    case SettingsAction::reset_preferences: next = Preferences{}; break;
+    default: return;
+    }
+    if (!WritePreferences(profile_, next)) {
+        MessageBoxW(hwnd_, L"Не удалось сохранить настройки.", L"Aqua Frame", MB_OK | MB_ICONERROR);
+        return;
+    }
+    preferences_ = std::move(next);
+    UpdateAquaPageSettings(preferences_);
+    for (const auto& item : tabs_) {
+        if (!item.browser || item.closing) continue;
+        ApplyZoom(item.browser, item.url);
+        if (item.url.starts_with(L"aqua://settings/") || item.url == L"aqua://newtab/")
+            item.browser->ReloadIgnoreCache();
+    }
+}
+
 void Window::Menu() {
     const auto menu = CreatePopupMenu();
     AppendMenuW(menu, MF_STRING, 1, L"Новая вкладка\tCtrl+T");
     AppendMenuW(menu, MF_STRING, 2, L"Восстановить вкладку\tCtrl+Shift+T");
     AppendMenuW(menu, MF_STRING, 3, L"Закрыть вкладку\tCtrl+W");
     AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, 6, L"Настройки");
     AppendMenuW(menu, MF_STRING, 5, L"Расширения — перетащить файл\tCtrl+Shift+E");
     AppendMenuW(menu, MF_STRING, 4, L"О браузере Aqua Frame");
     POINT pos{};
@@ -423,6 +522,7 @@ void Window::Menu() {
     if (action == 2) Shortcut('T', EVENTFLAG_CONTROL_DOWN | EVENTFLAG_SHIFT_DOWN);
     if (action == 3) CloseTab(selected_, false);
     if (action == 5) OpenExtensions();
+    if (action == 6) AddTab(L"aqua://settings/");
     if (action == 4) MessageBoxW(hwnd_, L"Aqua Frame 1.0.0\nAqua Deep Ocean\nBeyond the ordinary.",
                                  L"Aqua Frame", MB_OK | MB_ICONINFORMATION);
 }

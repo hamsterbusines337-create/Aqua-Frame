@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../extensions/manager.h"
+#include "../settings/page.h"
 #include "include/cef_browser.h"
 #include <windows.h>
 #include <cstdint>
@@ -10,7 +11,9 @@
 namespace aqua {
 class Window final {
 public:
-    bool Create(HINSTANCE instance, int show);
+    bool Create(HINSTANCE instance, int show, const std::filesystem::path& profile);
+    bool ResetRequested() const { return reset_requested_; }
+    void QueueSettingsAction(uint64_t tab, SettingsAction action);
     void AddTab(const std::wstring& url = L"aqua://newtab/");
     void BrowserCreated(uint64_t tab, CefRefPtr<CefBrowser> browser);
     bool QueueBrowserClose(uint64_t tab);
@@ -39,6 +42,9 @@ private:
     void Navigate();
     void Menu();
     void OpenExtensions();
+    void ApplySettingsAction(uint64_t tab, SettingsAction action);
+    void SaveSession();
+    void ApplyZoom(const CefRefPtr<CefBrowser>& browser, std::wstring_view url);
     RECT TabBounds(size_t index) const;
     Tab* Find(uint64_t id);
     CefRefPtr<CefBrowser> Current();
@@ -49,11 +55,14 @@ private:
     HFONT font_ = nullptr;
     HBRUSH address_brush_ = nullptr;
     CefRefPtr<ExtensionManager> extensions_;
+    std::filesystem::path profile_;
+    Preferences preferences_;
     std::vector<Tab> tabs_;
     std::vector<std::wstring> closed_;
     uint64_t next_id_ = 1;
     uint64_t selected_ = 0;
     UINT dpi_ = 96;
     bool exiting_ = false;
+    bool reset_requested_ = false;
 };
 }

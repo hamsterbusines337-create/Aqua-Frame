@@ -6,7 +6,7 @@ try {
     $runtime = Join-Path $dist 'runtime'
     & cmake --install build --config Release --prefix $runtime
     if ($LASTEXITCODE -ne 0) { throw 'Staging failed.' }
-    foreach ($file in 'AquaFrame.exe', 'libcef.dll', 'icudtl.dat', 'resources.pak', 'locales\en-US.pak') {
+    foreach ($file in 'AquaFrame.exe', 'AquaFrameReset.exe', 'libcef.dll', 'icudtl.dat', 'resources.pak', 'locales\en-US.pak') {
         if (!(Test-Path (Join-Path $runtime $file))) { throw "Missing runtime file: $file" }
     }
     $zip = Join-Path $dist 'AquaFrame-Portable.zip'

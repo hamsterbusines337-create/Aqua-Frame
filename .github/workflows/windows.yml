@@ -21,6 +21,9 @@ jobs:
       - name: Build Release
         shell: cmd
         run: call build.bat
+      - name: Verify factory reset on a disposable profile
+        shell: pwsh
+        run: ctest --test-dir build -C Release --output-on-failure
       - name: Smoke test browser process and renderer
         shell: pwsh
         run: ./tests/smoke.ps1

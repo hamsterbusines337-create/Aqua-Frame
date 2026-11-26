@@ -23,6 +23,10 @@ add_library(AquaFrame SHARED
   src/chromium/client.cpp
   src/extensions/manager.cpp
   src/navigation/address.cpp
+  src/profiles/profile.cpp
+  src/reset/restart.cpp
+  src/settings/page.cpp
+  src/settings/preferences.cpp
   src/ui/window.cpp
   src/chromium/pages.cpp)
 SET_LIBRARY_TARGET_PROPERTIES(AquaFrame)
@@ -39,6 +43,25 @@ SET_LPAC_ACLS(AquaFrame)
 install(DIRECTORY "${CEF_ROOT}/Release/" DESTINATION .
   PATTERN "bootstrap*.exe" EXCLUDE PATTERN "*.lib" EXCLUDE PATTERN "*.pdb" EXCLUDE PATTERN "*.exp" EXCLUDE)
 install(DIRECTORY "${CEF_ROOT}/Resources/" DESTINATION .)
-install(TARGETS AquaFrame RUNTIME DESTINATION .)
+add_executable(AquaFrameReset WIN32
+  src/reset/helper.cpp
+  src/reset/cleanup.cpp
+  src/reset/restart.cpp
+  src/profiles/profile.cpp)
+target_compile_definitions(AquaFrameReset PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
+target_compile_options(AquaFrameReset PRIVATE /utf-8)
+set_property(TARGET AquaFrameReset PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_link_libraries(AquaFrameReset PRIVATE shell32 ole32 user32)
+add_dependencies(AquaFrame AquaFrameReset)
+install(TARGETS AquaFrame AquaFrameReset RUNTIME DESTINATION .)
 install(PROGRAMS "${CEF_ROOT}/Release/bootstrap.exe" DESTINATION . RENAME AquaFrame.exe)
 install(FILES "${CEF_ROOT}/LICENSE.txt" DESTINATION . RENAME CEF-LICENSE.txt)
+
+include(CTest)
+if(BUILD_TESTING)
+  add_executable(AquaFrameResetTest tests/reset-cleanup.cpp
+    src/reset/cleanup.cpp src/profiles/profile.cpp)
+  target_compile_definitions(AquaFrameResetTest PRIVATE UNICODE _UNICODE NOMINMAX _WIN32_WINNT=0x0A00)
+  target_link_libraries(AquaFrameResetTest PRIVATE shell32 ole32)
+  add_test(NAME AquaFrameProfileReset COMMAND AquaFrameResetTest)
+endif()

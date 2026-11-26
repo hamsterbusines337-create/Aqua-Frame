@@ -26,7 +26,7 @@ bool IsWebUrl(const std::wstring& value) {
 }
 }
 
-std::wstring ResolveAddress(std::wstring_view input) {
+std::wstring ResolveAddress(std::wstring_view input, SearchEngine engine) {
     const auto start = input.find_first_not_of(L" \t\r\n");
     if (start == std::wstring_view::npos) return {};
     input = input.substr(start, input.find_last_not_of(L" \t\r\n") - start + 1);
@@ -49,7 +49,9 @@ std::wstring ResolveAddress(std::wstring_view input) {
     WideCharToMultiByte(CP_UTF8, 0, value.data(), static_cast<int>(value.size()),
         bytes.data(), count, nullptr, nullptr);
     constexpr wchar_t hex[] = L"0123456789ABCDEF";
-    std::wstring url = L"https://www.google.com/search?q=";
+    const auto endpoint = SearchEndpoint(engine);
+    std::wstring url(endpoint.begin(), endpoint.end());
+    url += L"?q=";
     for (const unsigned char byte : bytes) {
         if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') ||
             (byte >= '0' && byte <= '9') || byte == '-' || byte == '_' ||
