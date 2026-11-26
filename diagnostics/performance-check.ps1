@@ -1,4 +1,5 @@
 . (Join-Path $PSScriptRoot 'browser-integration.ps1') -HelpersOnly
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes
 
 $port = 39177
 $site = "http://127.0.0.1:$port"
@@ -74,10 +75,29 @@ try {
     $point.Y = [int](18 * [AquaWindowUi]::GetDpiForWindow($window) / 96)
     [void][AquaWindowUi]::ClientToScreen($window, [ref]$point)
     [void][AquaWindowUi]::SetCursorPos($point.X, $point.Y)
-    [AquaWindowUi]::mouse_event(8, 0, 0, 0, [UIntPtr]::Zero)
-    [AquaWindowUi]::mouse_event(16, 0, 0, 0, [UIntPtr]::Zero)
-    Start-Sleep -Milliseconds 350
-    [Windows.Forms.SendKeys]::SendWait('{END}{UP}{ENTER}')
+    $packed = [IntPtr](($point.Y -shl 16) -bor ($point.X -band 65535))
+    [void][AquaWindowUi]::PostMessage($window, 0x007b, $window, $packed)
+    $menu = Window-For '#32768' $null 4
+    if ($menu -eq $zero) { throw 'The native tab context menu did not open.' }
+    Screenshot $menu 'AquaFrame-Performance-Menu.png'
+    $menuElement = [Windows.Automation.AutomationElement]::FromHandle($menu)
+    $name = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::NameProperty, 'Выгрузить вкладку из памяти')
+    $item = $menuElement.FindFirst([Windows.Automation.TreeScope]::Descendants, $name)
+    if ($item -and $item.Current.IsEnabled) {
+        $bounds = $item.Current.BoundingRectangle
+        $x = [int]($bounds.Left + $bounds.Width / 2)
+        $y = [int]($bounds.Top + $bounds.Height / 2)
+    } else {
+        $bounds = New-Object AquaWindowUi+Rect
+        if (![AquaWindowUi]::GetWindowRect($menu, [ref]$bounds)) { throw 'Unable to measure the popup menu.' }
+        $x = $bounds.Left + 75
+        $y = $bounds.Bottom - [int](36 * [AquaWindowUi]::GetDpiForWindow($window) / 96)
+    }
+    [void][AquaWindowUi]::SetCursorPos($x, $y)
+    [AquaWindowUi]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 100
+    [AquaWindowUi]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
     $dialog = Window-For '#32770' 'Освобождение памяти Aqua Frame' 8
     if ($dialog -eq $zero) { throw 'The tab unload confirmation did not open.' }
     Screenshot $dialog 'AquaFrame-Performance-Unload.png'
