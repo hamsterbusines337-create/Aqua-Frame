@@ -160,6 +160,10 @@ try {
     $report = Find-Report $dialog
     if ($report -notmatch 'TTFB\):\s*(\d+)[.,]\d+') { throw "No first-byte timing found. Report: $report" }
     if ([int]$Matches[1] -lt 110) { throw "The first-byte timing missed the fixture delay. Report: $report" }
+    if ($report -notmatch 'rAF\):\s*[0-9]+[.,][0-9]+' -or
+        $report -notmatch 'CPU' -or $report -notmatch 'Chromium 158') {
+        throw "The performance report is missing measured browser and page values. Report: $report"
+    }
     Screenshot $dialog 'browser-timing.png'
     [void][AquaWindowUi]::PostMessage([AquaWindowUi]::GetDlgItem($dialog, 1), 0x00f5, $zero, $zero)
     Start-Sleep -Milliseconds 500
