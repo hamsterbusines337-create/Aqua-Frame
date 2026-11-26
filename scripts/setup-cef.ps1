@@ -8,7 +8,7 @@ $root = Split-Path -Parent $PSScriptRoot
 if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -and $env:PROCESSOR_ARCHITEW6432 -ne 'AMD64') {
     throw 'An x64 Windows installation is required.'
 }
-$null = Get-Command cmake, tar.exe
+$null = Get-Command cmake, tar.exe, curl.exe
 $vswhere = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
 if (!(Test-Path $vswhere) -or !(& $vswhere -latest -products '*' -version '[17.0,18.0)' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)) {
     throw 'Install Visual Studio 2022 with Desktop development with C++.'
@@ -28,7 +28,10 @@ if (!$Sha256) { throw 'Specify the verified SHA-256 for the selected CEF version
 if ($Sha256 -and !$Version) { throw '-Sha256 requires an explicit -Version.' }
 
 $base = 'https://cef-builds.spotifycdn.com/'
-$index = Invoke-RestMethod -Uri "${base}index.json" -MaximumRedirection 0
+Write-Host 'Reading the official CEF build index.'
+$indexJson = & curl.exe --fail --silent --show-error --proto '=https' --connect-timeout 15 --max-time 60 "${base}index.json"
+if ($LASTEXITCODE -ne 0) { throw 'Failed to fetch the official CEF build index.' }
+$index = ($indexJson -join "`n") | ConvertFrom-Json
 $release = $index.windows64.versions | Where-Object {
     $_.channel -eq 'stable' -and (!$Version -or $_.cef_version -eq $Version)
 } | Select-Object -First 1
@@ -56,7 +59,10 @@ $stage = Join-Path $thirdParty ('.cef-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $stage | Out-Null
 try {
     $archive = Join-Path $stage $package.name
-    Invoke-WebRequest -UseBasicParsing -Uri ($base + [Uri]::EscapeDataString($package.name)) -OutFile $archive -MaximumRedirection 0
+    Write-Host "Downloading $($package.name)."
+    & curl.exe --fail --silent --show-error --proto '=https' --connect-timeout 20 --max-time 240 --output $archive ($base + [Uri]::EscapeDataString($package.name))
+    if ($LASTEXITCODE -ne 0) { throw 'Failed to download the pinned CEF archive.' }
+    Write-Host 'Verifying the CEF archive.'
     if ((Get-Item $archive).Length -ne $package.size -or
         (Get-FileHash $archive -Algorithm SHA1).Hash -ne $package.sha1) {
         throw 'The CEF archive does not match the official size and checksum.'
@@ -64,6 +70,7 @@ try {
     $digest = (Get-FileHash $archive -Algorithm SHA256).Hash
     if ($Sha256 -and $digest -ne $Sha256) { throw 'CEF archive SHA-256 mismatch.' }
 
+    Write-Host 'Extracting CEF.'
     & tar.exe -xf $archive -C $stage
     if ($LASTEXITCODE -ne 0) { throw 'CEF extraction failed.' }
     $extracted = Join-Path $stage ($package.name -replace '\.tar\.bz2$', '')
