@@ -239,13 +239,14 @@ try {
     Position $window
     [void][AquaWindowUi]::SetForegroundWindow($window)
     Start-Sleep -Seconds 4
+    Wait-Request '(?m)^/selected\|'
+    Start-Sleep -Seconds 2
     $log = Request-Log
-    if ($log -notmatch '(?m)^/selected\|' -or $log -match '(?m)^/deferred\|') {
+    if ($log -match '(?m)^/deferred\|') {
         throw 'Session startup did not defer the background tab.'
     }
     Click-At $window 80 18
-    Start-Sleep -Seconds 3
-    if ((Request-Log) -notmatch '(?m)^/deferred\|') { throw 'Selecting a deferred tab did not load it.' }
+    Wait-Request '(?m)^/deferred\|'
     Write-Host 'Verified fullscreen, history, bookmarks, cookie isolation, and lazy restoration.'
     if ($timingError) { throw $timingError }
     Write-Host 'Verified measured TTFB, page frame intervals and process statistics.'
