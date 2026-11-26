@@ -21,7 +21,7 @@ public:
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
                         CefRefPtr<CefRequest>, bool, bool) override;
     bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
-        const CefString&, const CefString&, WindowOpenDisposition, bool,
+        const CefString&, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool,
         const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&,
         CefBrowserSettings&, CefRefPtr<CefDictionaryValue>&, bool*) override;
 

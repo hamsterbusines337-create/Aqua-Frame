@@ -60,7 +60,7 @@ public:
         DwmSetWindowAttribute(window->GetWindowHandle(), 20, &dark, sizeof(dark));
 
         CefBoxLayoutSettings settings;
-        settings.vertical = true;
+        settings.horizontal = false;
         auto layout = window->SetToBoxLayout(settings);
 
         auto toolbar = CefPanel::CreatePanel(nullptr);
@@ -177,7 +177,7 @@ bool ExtensionManager::OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>
 }
 
 bool ExtensionManager::OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
-    const CefString& target, const CefString&, WindowOpenDisposition, bool user_gesture,
+    const CefString& target, const CefString&, CefLifeSpanHandler::WindowOpenDisposition, bool user_gesture,
     const CefPopupFeatures&, CefWindowInfo&, CefRefPtr<CefClient>&, CefBrowserSettings&,
     CefRefPtr<CefDictionaryValue>&, bool*) {
     OpenExternalLink(target, user_gesture);
