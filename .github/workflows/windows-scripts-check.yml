@@ -2,7 +2,7 @@ name: Aqua Frame JavaScript import
 on:
   push:
     branches: [codex/aqua-screenshot]
-    paths: ['.github/workflows/windows-scripts-check.yml', 'diagnostics/scripts-import.ps1', 'diagnostics/scripts-fixture.py']
+    paths: ['.github/workflows/windows-scripts-check.yml', 'diagnostics/scripts-import.ps1', 'diagnostics/scripts-fixture.py', 'diagnostics/extension-drop.ps1']
 permissions:
   actions: read
   contents: read

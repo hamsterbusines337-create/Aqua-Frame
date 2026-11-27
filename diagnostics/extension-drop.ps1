@@ -66,6 +66,8 @@ public static class DropFixture {
     private static extern int DoDragDrop(System.Runtime.InteropServices.ComTypes.IDataObject data,
         IDropSource source, uint allowed, out uint effect);
 
+    [DllImport("kernel32.dll")] private static extern void Sleep(uint milliseconds);
+
     public static string Drag(string path, int x, int y) {
         var data = new DataObject();
         data.SetData(DataFormats.FileDrop, new[] { path });
@@ -76,7 +78,7 @@ public static class DropFixture {
             SetCursorPos(x - 80, y - 80);
             using (var motion = new System.Threading.Timer(_ => {
                 SetCursorPos(x, y);
-                System.Threading.Thread.Sleep(800);
+                Sleep(800);
                 source.Drop = true;
                 SetCursorPos(x + 1, y);
                 mouse_event(4, 0, 0, 0, UIntPtr.Zero);
