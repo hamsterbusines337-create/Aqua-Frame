@@ -1,7 +1,7 @@
 param([switch]$PickerOnly)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This test needs a disposable GitHub Actions runner.' }
-if (!$PickerOnly) { . (Join-Path $PSScriptRoot 'extension-drop.ps1') -HelpersOnly }
+if (!$PickerOnly) { Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes }
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @'
 using System;
@@ -118,6 +118,47 @@ function Confirm-Script([string]$label) {
     }
     Start-Sleep -Seconds 2
 }
+function Drag-FromExplorer([IntPtr]$window, [string]$path) {
+    $folder = Join-Path $env:RUNNER_TEMP 'AquaScriptDrop'
+    New-Item -ItemType Directory -Path $folder | Out-Null
+    Copy-Item -LiteralPath $path -Destination $folder
+    Start-Process explorer.exe -ArgumentList ('"' + $folder + '"')
+    $explorer = Window-For 'CabinetWClass' 'AquaScriptDrop' 12
+    if ($explorer -eq $zero) { throw 'Explorer did not open the fixture folder.' }
+    [void][AquaScriptUi]::SetWindowPos($explorer, [IntPtr](-1), 526, 175, 480, 410, 64)
+    [void][AquaScriptUi]::SetForegroundWindow($explorer)
+    Start-Sleep -Seconds 2
+    $root = [Windows.Automation.AutomationElement]::FromHandle($explorer)
+    $filename = [IO.Path]::GetFileName($path)
+    $withExtension = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::NameProperty, $filename)
+    $withoutExtension = [Windows.Automation.PropertyCondition]::new(
+        [Windows.Automation.AutomationElement]::NameProperty, [IO.Path]::GetFileNameWithoutExtension($filename))
+    $name = [Windows.Automation.OrCondition]::new($withExtension, $withoutExtension)
+    $item = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $name)
+    if (!$item) { throw 'Explorer UI Automation could not find the JS file.' }
+    $bounds = $item.Current.BoundingRectangle
+    $x = [int]($bounds.Left + $bounds.Width / 2)
+    $y = [int]($bounds.Top + $bounds.Height / 2)
+    $target = New-Object AquaScriptUi+Point
+    $target.X = 390
+    $target.Y = 294
+    if (![AquaScriptUi]::ClientToScreen($window, [ref]$target)) { throw 'Unable to locate Aqua Scripts.' }
+    [void][AquaScriptUi]::SetCursorPos($x, $y)
+    [AquaScriptUi]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+    try {
+        Start-Sleep -Milliseconds 250
+        for ($i = 1; $i -le 18; $i++) {
+            [void][AquaScriptUi]::SetCursorPos([int]($x + ($target.X - $x) * $i / 18),
+                [int]($y + ($target.Y - $y) * $i / 18))
+            Start-Sleep -Milliseconds 65
+        }
+        Start-Sleep -Milliseconds 500
+    } finally {
+        [AquaScriptUi]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+        [void][AquaScriptUi]::PostMessage($explorer, 0x0010, $zero, $zero)
+    }
+}
 $port = 39123
 $site = "http://127.0.0.1:$port/"
 $other = "http://localhost:$port/"
@@ -156,12 +197,8 @@ try {
     if ($PickerOnly) {
         Import-Script $window $plain 'plain'
     } else {
-        $point = New-Object AquaScriptUi+Point
-        $point.X = 489
-        $point.Y = 300
-        if (![AquaScriptUi]::ClientToScreen($window, [ref]$point)) { throw 'Unable to locate the script drop zone.' }
-        Write-Host 'Picker import is visible. Starting native file drag.'
-        Write-Host ([DropFixture]::Drag($plain, $point.X, $point.Y))
+        Write-Host 'Picker import was saved. Starting Explorer drag.'
+        Drag-FromExplorer $window $plain
         if ((Window-For '#32770' 'Разрешение Aqua Scripts' 4) -eq $zero) {
             Screenshot $window 'scripts-drop-error.png'
             throw 'The file drop did not open a confirmation.'
