@@ -1,6 +1,7 @@
+param([switch]$PickerOnly)
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This test needs a disposable GitHub Actions runner.' }
-. (Join-Path $PSScriptRoot 'extension-drop.ps1') -HelpersOnly
+if (!$PickerOnly) { . (Join-Path $PSScriptRoot 'extension-drop.ps1') -HelpersOnly }
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @'
 using System;
@@ -152,19 +153,23 @@ try {
     Import-Script $window $script 'userscript'
     if (!(Test-Path -LiteralPath $library)) { throw 'The confirmed file was not added to the library.' }
     Screenshot $window 'scripts-picker-list.png'
-    $point = New-Object AquaScriptUi+Point
-    $point.X = 489
-    $point.Y = 300
-    if (![AquaScriptUi]::ClientToScreen($window, [ref]$point)) { throw 'Unable to locate the script drop zone.' }
-    Write-Host 'Picker import is visible. Starting native file drag.'
-    Write-Host ([DropFixture]::Drag($plain, $point.X, $point.Y))
-    if ((Window-For '#32770' 'Разрешение Aqua Scripts' 4) -eq $zero) {
-        Screenshot $window 'scripts-drop-error.png'
-        throw 'The file drop did not open a confirmation.'
+    if ($PickerOnly) {
+        Import-Script $window $plain 'plain'
+    } else {
+        $point = New-Object AquaScriptUi+Point
+        $point.X = 489
+        $point.Y = 300
+        if (![AquaScriptUi]::ClientToScreen($window, [ref]$point)) { throw 'Unable to locate the script drop zone.' }
+        Write-Host 'Picker import is visible. Starting native file drag.'
+        Write-Host ([DropFixture]::Drag($plain, $point.X, $point.Y))
+        if ((Window-For '#32770' 'Разрешение Aqua Scripts' 4) -eq $zero) {
+            Screenshot $window 'scripts-drop-error.png'
+            throw 'The file drop did not open a confirmation.'
+        }
+        Confirm-Script 'drop'
+        Screenshot $window 'scripts-drop-list.png'
+        if ((Get-Address $window) -ne 'aqua://settings/#scripts') { throw 'The drop navigated away from Aqua Scripts.' }
     }
-    Confirm-Script 'drop'
-    Screenshot $window 'scripts-drop-list.png'
-    if ((Get-Address $window) -ne 'aqua://settings/#scripts') { throw 'The drop navigated away from Aqua Scripts.' }
     $entries = @(Get-Content $library -Raw | ConvertFrom-Json)
     if ($entries.Count -ne 2) { throw 'Both scripts must be saved.' }
     foreach ($entry in $entries) {
