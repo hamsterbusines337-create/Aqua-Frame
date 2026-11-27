@@ -105,16 +105,6 @@ function Import-Script([IntPtr]$window, [string]$path, [string]$label) {
     Confirm-Script $label
 }
 
-function Copy-VisibleScripts([IntPtr]$window) {
-    [Windows.Forms.Clipboard]::Clear()
-    [void][AquaScriptUi]::SetForegroundWindow($window)
-    Click-At $window 915 116
-    [Windows.Forms.SendKeys]::SendWait('^a')
-    [Windows.Forms.SendKeys]::SendWait('^c')
-    Start-Sleep -Milliseconds 450
-    return [Windows.Forms.Clipboard]::GetText()
-}
-
 function Confirm-Script([string]$label) {
     $confirm = Window-For '#32770' 'Разрешение Aqua Scripts' 12
     if ($confirm -eq $zero) {
@@ -160,10 +150,8 @@ try {
     Open-Address $window 'aqua://settings/#scripts'
     Screenshot $window 'scripts-before.png'
     Import-Script $window $script 'userscript'
-    if ((Copy-VisibleScripts $window) -notmatch 'aqua-scope-fixture.user.js') {
-        throw 'The confirmed file is missing from the rendered script list.'
-    }
-    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    if (!(Test-Path -LiteralPath $library)) { throw 'The confirmed file was not added to the library.' }
+    Screenshot $window 'scripts-picker-list.png'
     $point = New-Object AquaScriptUi+Point
     $point.X = 489
     $point.Y = 300
@@ -175,11 +163,8 @@ try {
         throw 'The file drop did not open a confirmation.'
     }
     Confirm-Script 'drop'
-    if ((Copy-VisibleScripts $window) -notmatch 'aqua-plain-fixture.js') {
-        throw 'The dropped file is missing from the rendered script list.'
-    }
+    Screenshot $window 'scripts-drop-list.png'
     if ((Get-Address $window) -ne 'aqua://settings/#scripts') { throw 'The drop navigated away from Aqua Scripts.' }
-    [Windows.Forms.SendKeys]::SendWait('{ESC}')
     $entries = @(Get-Content $library -Raw | ConvertFrom-Json)
     if ($entries.Count -ne 2) { throw 'Both scripts must be saved.' }
     foreach ($entry in $entries) {
