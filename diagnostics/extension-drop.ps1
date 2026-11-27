@@ -1,11 +1,9 @@
 param([switch]$HelpersOnly)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
-Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing @'
+Add-Type @'
 using System;
-using System.Drawing;
 using System.Runtime.InteropServices;
-using System.Windows.Forms;
 
 public static class DropFixture {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern IntPtr FindWindow(string name, string title);
@@ -68,13 +66,23 @@ public static class DropFixture {
 
     [DllImport("kernel32.dll")] private static extern void Sleep(uint milliseconds);
 
+    [DllImport("shell32.dll", CharSet=CharSet.Unicode)]
+    private static extern int SHParseDisplayName(string path, IntPtr bindContext,
+        out IntPtr pidl, uint mask, out uint attributes);
+    [DllImport("shell32.dll")]
+    private static extern int SHCreateDataObject(IntPtr folder, uint count, IntPtr[] items,
+        IntPtr inner, ref Guid iid, [MarshalAs(UnmanagedType.Interface)] out System.Runtime.InteropServices.ComTypes.IDataObject data);
+
     public static string Drag(string path, int x, int y) {
-        var data = new DataObject();
-        data.SetData(DataFormats.FileDrop, new[] { path });
         var source = new TestDropSource();
         int init = OleInitialize(IntPtr.Zero);
         if (init < 0) Marshal.ThrowExceptionForHR(init);
+        IntPtr item = IntPtr.Zero;
+        System.Runtime.InteropServices.ComTypes.IDataObject data = null;
         try {
+            Marshal.ThrowExceptionForHR(SHParseDisplayName(path, IntPtr.Zero, out item, 0, out _));
+            var iid = typeof(System.Runtime.InteropServices.ComTypes.IDataObject).GUID;
+            Marshal.ThrowExceptionForHR(SHCreateDataObject(IntPtr.Zero, 1, new[] { item }, IntPtr.Zero, ref iid, out data));
             SetCursorPos(x - 80, y - 80);
             using (var motion = new System.Threading.Timer(_ => {
                 SetCursorPos(x, y);
@@ -87,7 +95,11 @@ public static class DropFixture {
                 int status = DoDragDrop(data, source, 1, out effect);
                 return "HRESULT=0x" + status.ToString("X") + " effect=" + effect;
             }
-        } finally { OleUninitialize(); }
+        } finally {
+            if (data != null) Marshal.ReleaseComObject(data);
+            if (item != IntPtr.Zero) Marshal.FreeCoTaskMem(item);
+            OleUninitialize();
+        }
     }
 
 }
