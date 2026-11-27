@@ -138,13 +138,18 @@ function Drag-FromExplorer([IntPtr]$window, [string]$path) {
     $item = $root.FindFirst([Windows.Automation.TreeScope]::Descendants, $name)
     if (!$item) { throw 'Explorer UI Automation could not find the JS file.' }
     $bounds = $item.Current.BoundingRectangle
-    $x = [int]($bounds.Left + $bounds.Width / 2)
+    $x = [int]($bounds.Left + [Math]::Min(24, $bounds.Width / 2))
     $y = [int]($bounds.Top + $bounds.Height / 2)
+    Screenshot $explorer 'scripts-explorer-source.png'
+    Write-Host "Explorer item $filename at $x,$y."
     $target = New-Object AquaScriptUi+Point
     $target.X = 390
-    $target.Y = 294
+    $target.Y = 224
     if (![AquaScriptUi]::ClientToScreen($window, [ref]$target)) { throw 'Unable to locate Aqua Scripts.' }
     [void][AquaScriptUi]::SetCursorPos($x, $y)
+    [AquaScriptUi]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
+    [AquaScriptUi]::mouse_event(4, 0, 0, 0, [UIntPtr]::Zero)
+    Start-Sleep -Milliseconds 650
     [AquaScriptUi]::mouse_event(2, 0, 0, 0, [UIntPtr]::Zero)
     try {
         Start-Sleep -Milliseconds 250
@@ -199,7 +204,7 @@ try {
     } else {
         Write-Host 'Picker import was saved. Starting Explorer drag.'
         Drag-FromExplorer $window $plain
-        if ((Window-For '#32770' 'Разрешение Aqua Scripts' 4) -eq $zero) {
+        if ((Window-For '#32770' 'Разрешение Aqua Scripts' 8) -eq $zero) {
             Screenshot $window 'scripts-drop-error.png'
             throw 'The file drop did not open a confirmation.'
         }
