@@ -51,6 +51,7 @@ private:
         bool pinned = false;
         unsigned group = 0;
         bool unloading = false;
+        bool focus_on_show = false;
     };
 
     static LRESULT CALLBACK Procedure(HWND, UINT, WPARAM, LPARAM);
@@ -63,7 +64,7 @@ private:
     bool CanUnloadTab(const Tab& tab) const;
     void UnloadTab(uint64_t id);
     void WarmRestoredTab();
-    void Select(uint64_t id);
+    void Select(uint64_t id, bool focus_content = false);
     void Navigate();
     void Menu();
     void TabMenu(uint64_t id, POINT position);
@@ -80,7 +81,7 @@ private:
     void ToggleBookmark();
     void ToggleFullscreen();
     void MeasureNavigation();
-    void ShowNavigationTiming(uint64_t tab);
+    void ShowNavigationTiming(uint64_t request);
     void RefreshDownloads();
     void RunDownloadAction(uint64_t tab);
     void ScheduleHistorySave();
@@ -141,6 +142,7 @@ private:
     POINT drag_start_{};
     bool tab_reordered_ = false;
     uint64_t timing_tab_ = 0;
+    uint64_t timing_request_ = 0;
     CefRefPtr<ScriptRun> timing_run_;
     std::optional<NavigationTiming> timing_result_;
     ProcessSnapshot performance_before_;

@@ -82,7 +82,11 @@ void ScriptRun::OnDevToolsMethodResult(CefRefPtr<CefBrowser>, int message_id,
     if (timing_ && timing && timing->GetBool("valid")) {
         Finish(NavigationTiming{ReadNumber(timing, "dns"), ReadNumber(timing, "connection"),
             ReadNumber(timing, "tls"), ReadNumber(timing, "firstByte"), ReadNumber(timing, "document"),
-            ReadNumber(timing, "fps"), ReadNumber(timing, "frameMs"), ReadNumber(timing, "lowFps")});
+            ReadNumber(timing, "fps"), ReadNumber(timing, "frameMs"), ReadNumber(timing, "lowFps"),
+            ReadNumber(timing, "sampleMs"), ReadNumber(timing, "p95FrameMs"),
+            ReadNumber(timing, "p99FrameMs"), ReadNumber(timing, "over120Percent"),
+            timing->GetInt("intervals"), timing->HasKey("longAnimationFrames") ?
+                timing->GetInt("longAnimationFrames") : -1});
     } else {
         Finish();
     }
@@ -107,18 +111,43 @@ document:entry.loadEventEnd};
 if (document.visibilityState !== 'visible') return result;
 return new Promise(resolve => {
     const deltas = [];
+    let longAnimationFrames = 0;
+    const observeLongFrames = PerformanceObserver.supportedEntryTypes.includes('long-animation-frame');
+    const observer = observeLongFrames ? new PerformanceObserver(list => {
+        longAnimationFrames += list.getEntries().length;
+    }) : null;
+    observer?.observe({type:'long-animation-frame'});
+    const start = performance.now();
     let last = 0;
     let animation = 0;
+    let timeout = 0;
     const finish = () => {
+        clearTimeout(timeout);
         cancelAnimationFrame(animation);
-        if (deltas.length < 5 || document.visibilityState !== 'visible') {
+        document.removeEventListener('visibilitychange', finish);
+        if (observer) {
+            longAnimationFrames += observer.takeRecords().length;
+            observer.disconnect();
+        }
+        const elapsed = performance.now() - start;
+        if (deltas.length < 5 || elapsed < 4900 ||
+            document.visibilityState !== 'visible' || location.href !== page) {
             resolve(result);
             return;
         }
+        result.sampleMs = elapsed;
+        result.intervals = deltas.length;
+        if (observer) result.longAnimationFrames = longAnimationFrames;
         result.frameMs = deltas.reduce((sum, delta) => sum + delta, 0) / deltas.length;
         result.fps = 1000 / result.frameMs;
+        // Allow for small timestamp and scheduler variation around 120 Hz.
+        const budget = 1000 / 120 + 0.5;
+        result.over120Percent = 100 * deltas.filter(delta => delta > budget).length / deltas.length;
+        deltas.sort((a, b) => a - b);
+        result.p95FrameMs = deltas[Math.ceil(deltas.length * .95) - 1];
+        result.p99FrameMs = deltas[Math.ceil(deltas.length * .99) - 1];
         if (deltas.length >= 100) {
-            const slowest = deltas.sort((a, b) => b - a).slice(0, Math.ceil(deltas.length / 100));
+            const slowest = deltas.slice(-Math.ceil(deltas.length / 100));
             result.lowFps = 1000 * slowest.length / slowest.reduce((sum, delta) => sum + delta, 0);
         }
         resolve(result);
@@ -128,8 +157,9 @@ return new Promise(resolve => {
         last = timestamp;
         animation = requestAnimationFrame(frame);
     };
+    document.addEventListener('visibilitychange', finish, {once:true});
     animation = requestAnimationFrame(frame);
-    setTimeout(finish, 1250);
+    timeout = setTimeout(finish, 5000);
 });
 )JS";
     for (const auto& script : scripts_) {

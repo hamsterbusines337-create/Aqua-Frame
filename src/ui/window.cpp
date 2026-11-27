@@ -48,6 +48,18 @@ bool IsSettings(std::wstring_view address) {
     return address == L"aqua://settings" || address.starts_with(L"aqua://settings/");
 }
 
+DWORD MonitorRefreshRate(HWND window) {
+    MONITORINFOEXW monitor{};
+    monitor.cbSize = sizeof(monitor);
+    if (!GetMonitorInfoW(MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST),
+                         reinterpret_cast<MONITORINFO*>(&monitor))) return 0;
+    DEVMODEW mode{};
+    mode.dmSize = sizeof(mode);
+    if (!EnumDisplaySettingsW(monitor.szDevice, ENUM_CURRENT_SETTINGS, &mode) ||
+        !(mode.dmFields & DM_DISPLAYFREQUENCY) || mode.dmDisplayFrequency <= 1) return 0;
+    return mode.dmDisplayFrequency;
+}
+
 void Fill(HDC dc, RECT area, COLORREF color) {
     SetDCBrushColor(dc, color);
     FillRect(dc, &area, static_cast<HBRUSH>(GetStockObject(DC_BRUSH)));
@@ -245,14 +257,14 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
             const auto dragged = dragged_tab_;
             const bool reordered = tab_reordered_;
             ReleaseCapture();
-            if (reordered) { Select(dragged); return 0; }
+            if (reordered) { Select(dragged, true); return 0; }
         }
         if (point.y < Scale(36)) {
             for (size_t i = 0; i < tabs_.size(); ++i) {
                 const auto r = TabBounds(i);
                 if (!PtInRect(&r, point)) continue;
                 if (point.x >= r.right - Scale(26)) CloseTab(tabs_[i].id, false);
-                else Select(tabs_[i].id);
+                else Select(tabs_[i].id, true);
                 return 0;
             }
             const auto last = TabBounds(tabs_.empty() ? 0 : tabs_.size() - 1);
@@ -565,8 +577,11 @@ void Window::BrowserCreated(uint64_t id, CefRefPtr<CefBrowser> browser) {
         browser->GetHost()->CloseBrowser(true);
         return;
     }
+    const bool focus_content = std::exchange(tab->focus_on_show, false);
     if (id == selected_) Layout();
     ShowWindow(browser->GetHost()->GetWindowHandle(), id == selected_ ? SW_SHOWNA : SW_HIDE);
+    if (focus_content && id == selected_ && GetForegroundWindow() == hwnd_)
+        browser->GetHost()->SetFocus(true);
 }
 
 bool Window::QueueBrowserClose(uint64_t id) {
@@ -589,7 +604,7 @@ void Window::BrowserClosed(uint64_t id) {
         tab->browser = nullptr;
         tab->deferred = true;
         tab->unloading = false;
-        if (id == selected_) Select(id);
+        if (id == selected_) Select(id, tab->focus_on_show);
         return;
     }
     if (const auto* tab = Find(id); tab && !exiting_ && !tab->private_tab) {
@@ -652,7 +667,7 @@ void Window::WarmRestoredTab() {
         tab && tab->deferred && !tab->closing) StartTab(*tab);
 }
 
-void Window::Select(uint64_t id) {
+void Window::Select(uint64_t id, bool focus_content) {
     if (id != restore_foreground_ && restore_warm_tab_) {
         KillTimer(hwnd_, warm_restore_timer);
         restore_warm_tab_ = 0;
@@ -665,6 +680,7 @@ void Window::Select(uint64_t id) {
     }
     selected_ = id;
     if (auto* tab = Find(id)) {
+        tab->focus_on_show = focus_content && (!tab->browser || tab->unloading);
         if (tab->deferred && !StartTab(*tab)) {
             BrowserClosed(id);
             return;
@@ -674,7 +690,10 @@ void Window::Select(uint64_t id) {
         SetWindowTextW(edit_, tab->url == L"aqua://newtab/" ? L"" : tab->url.c_str());
     }
     Layout();
-    if (auto browser = Current()) ShowWindow(browser->GetHost()->GetWindowHandle(), SW_SHOWNA);
+    if (auto browser = Current()) {
+        ShowWindow(browser->GetHost()->GetWindowHandle(), SW_SHOWNA);
+        if (focus_content && GetForegroundWindow() == hwnd_) browser->GetHost()->SetFocus(true);
+    }
 }
 
 void Window::AddressChanged(uint64_t id, const CefString& address) {
@@ -769,7 +788,7 @@ bool Window::Shortcut(int key, int modifiers) {
     if (key == VK_TAB && !tabs_.empty()) {
         const auto active = std::ranges::find(tabs_, selected_, &Tab::id) - tabs_.begin();
         const auto index = (active + tabs_.size() + (shift ? -1 : 1)) % tabs_.size();
-        Select(tabs_[index].id);
+        Select(tabs_[index].id, true);
         return true;
     }
     if (key == 'H') { ShowLibrary(L"history"); return true; }
@@ -779,6 +798,7 @@ bool Window::Shortcut(int key, int modifiers) {
     if (key == 'B' && shift) { bookmark_bar_ = !bookmark_bar_; Layout(); return true; }
     if (key == 'N' && shift) { AddTab(L"aqua://newtab/", true); return true; }
     if (key == 'L') {
+        if (auto* tab = Find(selected_)) tab->focus_on_show = false;
         SetFocus(edit_);
         SendMessageW(edit_, EM_SETSEL, 0, -1);
         return true;
@@ -821,21 +841,23 @@ void Window::MeasureNavigation() {
         return;
     }
     if (timing_run_) timing_run_->Cancel();
+    timing_result_.reset();
     timing_tab_ = selected_;
+    const auto request = ++timing_request_;
     performance_before_ = SampleBrowserProcesses();
     timing_run_ = new ScriptRun(browser->GetHost(), std::move(url),
-        [this, id = selected_](std::optional<NavigationTiming> result) {
+        [this, request](std::optional<NavigationTiming> result) {
             timing_result_ = std::move(result);
-            PostMessageW(hwnd_, navigation_timing_ready, id, 0);
+            PostMessageW(hwnd_, navigation_timing_ready, request, 0);
         });
     timing_run_->Start();
 }
 
-void Window::ShowNavigationTiming(uint64_t tab) {
-    if (exiting_ || tab != timing_tab_ || !timing_run_) return;
+void Window::ShowNavigationTiming(uint64_t request) {
+    if (exiting_ || request != timing_request_ || !timing_run_) return;
     timing_run_->Cancel();
     timing_run_ = nullptr;
-    if (tab != selected_) return;
+    if (timing_tab_ != selected_) return;
     auto timing = std::exchange(timing_result_, std::nullopt);
     if (!timing) {
         MessageBoxW(hwnd_, L"Данные загрузки страницы пока недоступны.", L"Aqua Performance", MB_OK);
@@ -847,10 +869,24 @@ void Window::ShowNavigationTiming(uint64_t tab) {
         L"При использовании кэша или готового соединения некоторые интервалы равны нулю.\n\n",
         timing->dns, timing->connection, timing->tls, timing->first_byte, timing->document);
     std::wstring report = data;
+    if (const auto hz = MonitorRefreshRate(hwnd_)) {
+        swprintf_s(data, L"Частота монитора по данным Windows: %lu Гц\n", hz);
+        report += data;
+    }
     if (timing->page_fps > 0) {
         swprintf_s(data, L"Кадры страницы (rAF): %.1f FPS · %.2f мс на кадр\n",
                    timing->page_fps, timing->page_frame_ms);
         report += data;
+        swprintf_s(data, L"Длительность замера: %.1f с · Интервалов: %d\n"
+            L"P95: %.2f мс · P99: %.2f мс\nИнтервалы дольше бюджета 120 FPS (+0,5 мс): %.1f%%\n",
+            timing->sample_ms / 1000.0, timing->intervals, timing->p95_frame_ms, timing->p99_frame_ms,
+            timing->over_120_percent);
+        report += data;
+        if (timing->long_animation_frames >= 0) {
+            swprintf_s(data, L"Долгие кадры по данным Chromium (>50 мс): %d\n",
+                       timing->long_animation_frames);
+            report += data;
+        }
         if (timing->low_fps > 0) {
             swprintf_s(data, L"1%% low страницы: %.1f FPS\n", timing->low_fps);
             report += data;

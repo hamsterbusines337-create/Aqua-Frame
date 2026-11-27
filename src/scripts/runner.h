@@ -16,6 +16,12 @@ struct NavigationTiming {
     double page_fps = 0;
     double page_frame_ms = 0;
     double low_fps = 0;
+    double sample_ms = 0;
+    double p95_frame_ms = 0;
+    double p99_frame_ms = 0;
+    double over_120_percent = 0;
+    int intervals = 0;
+    int long_animation_frames = -1;
 };
 
 class ScriptRun final : public CefDevToolsMessageObserver {
