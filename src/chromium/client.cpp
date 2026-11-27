@@ -2,8 +2,20 @@
 #include "../ui/window.h"
 #include "include/cef_frame.h"
 #include "../settings/page.h"
+#include "../scripts/drop.h"
 
 namespace aqua {
+bool Client::OnProcessMessageReceived(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+                                       CefProcessId source, CefRefPtr<CefProcessMessage> message) {
+    if (message->GetName() != script_drop_message) return false;
+    if (source != PID_RENDERER || private_tab_ || browser->IsPopup() || !frame->IsMain() ||
+        frame->GetURL() != "aqua://settings/#scripts") return true;
+    const auto args = message->GetArgumentList();
+    if (args && args->GetSize() == 2 && args->GetType(0) == VTYPE_STRING && args->GetType(1) == VTYPE_STRING)
+        window_.QueueDroppedScript(tab_, args->GetString(0), args->GetString(1));
+    return true;
+}
+
 bool Client::OnBeforeBrowse(CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
                             CefRefPtr<CefRequest> request, bool user_gesture, bool is_redirect) {
     const auto target = request->GetURL().ToString();

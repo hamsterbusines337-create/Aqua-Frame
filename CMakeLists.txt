@@ -27,6 +27,7 @@ add_library(AquaFrame SHARED
   src/performance/processes.cpp
   src/profiles/profile.cpp
   src/reset/restart.cpp
+  src/scripts/drop.cpp
   src/scripts/library.cpp
   src/scripts/runner.cpp
   src/settings/page.cpp

@@ -1,4 +1,6 @@
 #include "manager.h"
+#include "../scripts/library.h"
+#include "include/cef_drag_data.h"
 
 #include "include/cef_frame.h"
 #include "include/cef_image.h"
@@ -59,7 +61,8 @@ public:
         if (!window) return;
         MessageBoxW(window->GetWindowHandle(),
             L"Включите режим разработчика и перетащите ZIP или CRX из Проводника на страницу.\n\n"
-            L"Для ZIP файл manifest.json должен лежать в корне архива.",
+            L"Для ZIP файл manifest.json должен лежать в корне архива.\n\n"
+            L"Для .js и .user.js откройте Aqua Scripts по кнопке рядом.",
             L"Установка расширений — Aqua Frame", MB_OK | MB_ICONINFORMATION);
     }
 
@@ -114,7 +117,7 @@ public:
         help->SetFontList("Segoe UI, 13px");
         help->SetHorizontalAlignment(CEF_HORIZONTAL_ALIGNMENT_LEFT);
         toolbar->AddChildView(help);
-        auto scripts = CefLabelButton::CreateLabelButton(new OpenScripts(open_scripts_), L"Aqua Scripts · импорт JS");
+        auto scripts = CefLabelButton::CreateLabelButton(new OpenScripts(open_scripts_), L"Aqua Scripts · импорт и перетаскивание JS");
         scripts->SetMinimumSize(CefSize(0, 42));
         scripts->SetEnabledTextColors(aqua_accent);
         scripts->SetBackgroundColor(aqua_toolbar);
@@ -240,5 +243,13 @@ void ExtensionManager::OpenExternalLink(const CefString& target, bool user_gestu
         open_web_tab_(url);
         SetForegroundWindow(owner_);
     }
+}
+
+bool ExtensionManager::OnDragEnter(CefRefPtr<CefBrowser>, CefRefPtr<CefDragData> data, DragOperationsMask) {
+    std::vector<CefString> paths;
+    if (!data->GetFilePaths(paths)) data->GetFileNames(paths);
+    return std::ranges::any_of(paths, [](const CefString& path) {
+        return IsJavaScriptFilename(path.ToWString());
+    });
 }
 }

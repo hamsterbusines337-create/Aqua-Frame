@@ -195,6 +195,8 @@ std::string RenderSettings(const Preferences& settings, const std::vector<Script
 <section id="scripts"><h2>Aqua Scripts</h2><div class="card"><h3>Импорт JavaScript</h3>
 <p>Откройте сайт, для которого нужен скрипт. Затем выберите файл .js или .user.js либо перетащите его из Проводника на верхнюю панель Aqua Frame. Скрипт запустится при следующей загрузке разрешённого сайта.</p>)HTML";
     html += Link("script-import", "Выбрать файл JS");
+    html += R"HTML(<p>Можно перетащить .js или .user.js из Проводника на эту страницу.</p>
+<p id="script-drop-status" role="status"></p><script src="/script-drop.js" defer></script>)HTML";
     html += "</div>";
     if (scripts.empty()) html += "<div class=\"card\"><p>Скриптов пока нет.</p></div>";
     for (const auto& script : scripts) {

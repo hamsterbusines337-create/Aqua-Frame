@@ -8,12 +8,18 @@
 #include "../ui/window.h"
 #include "../profiles/profile.h"
 #include "../reset/restart.h"
+#include "../scripts/drop.h"
 
 namespace {
-class App final : public CefApp, public CefBrowserProcessHandler {
+class App final : public CefApp, public CefBrowserProcessHandler, public CefRenderProcessHandler {
 public:
     App(HINSTANCE instance, int show) : instance_(instance), show_(show) {}
     CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
+    CefRefPtr<CefRenderProcessHandler> GetRenderProcessHandler() override { return this; }
+    void OnContextCreated(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
+                          CefRefPtr<CefV8Context> context) override {
+        aqua::BindScriptDrop(frame, context);
+    }
     CefRefPtr<CefClient> GetDefaultClient() override { return window_.DefaultChromeClient(); }
     void OnBeforeCommandLineProcessing(const CefString& process_type,
                                        CefRefPtr<CefCommandLine> command_line) override {

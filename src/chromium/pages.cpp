@@ -101,6 +101,43 @@ Preferences page_preferences;
 std::vector<Script> page_scripts;
 std::vector<PageEntry> page_history, page_bookmarks;
 std::vector<DownloadEntry> page_downloads;
+constexpr auto script_drop_js = R"JS(
+const filesInDrag = event => event.dataTransfer?.types.includes('Files');
+const onScriptsPage = () => location.hash === '#scripts';
+const status = document.getElementById('script-drop-status');
+for (const type of ['dragenter', 'dragover', 'drop']) {
+    window.addEventListener(type, async event => {
+        if (!onScriptsPage() || !filesInDrag(event)) return;
+        event.preventDefault();
+        if (type !== 'drop') {
+            event.dataTransfer.dropEffect = 'copy';
+            return;
+        }
+        if (!event.isTrusted) return;
+        const files = event.dataTransfer.files;
+        if (files.length !== 1 || !/\.js$/i.test(files[0].name)) {
+            status.textContent = 'Перетащите один файл .js или .user.js.';
+            return;
+        }
+        const file = files[0];
+        if (file.size > 512 * 1024) {
+            status.textContent = 'Файл превышает лимит 512 КиБ.';
+            return;
+        }
+        try {
+            const source = new TextDecoder('utf-8', {fatal:true}).decode(await file.arrayBuffer());
+            if (!onScriptsPage()) return;
+            if (typeof aquaImportDropped !== 'function' || !aquaImportDropped(file.name, source)) {
+                status.textContent = 'Импорт недоступен. Используйте кнопку «Выбрать файл JS».';
+                return;
+            }
+            status.textContent = '';
+        } catch {
+            status.textContent = 'Не удалось прочитать файл в кодировке UTF-8.';
+        }
+    });
+}
+)JS";
 
 class PageBytes final : public CefBaseRefCounted {
 public:
@@ -119,6 +156,8 @@ public:
 
         const auto url = request->GetURL().ToString();
         std::string page;
+        const bool settings_page = url == "aqua://settings/" || url.starts_with("aqua://settings/#");
+        const bool drop_script = url == "aqua://settings/script-drop.js";
         if (url == "aqua://newtab/") {
             SearchEngine engine;
             Theme theme;
@@ -165,9 +204,11 @@ public:
                 }
                 page.insert(page.find("</main>"), list + "</ul></section>");
             }
-        } else if (url == "aqua://settings/" || url.starts_with("aqua://settings/#")) {
+        } else if (settings_page) {
             const std::scoped_lock lock(page_mutex);
             page = RenderSettings(page_preferences, page_scripts);
+        } else if (drop_script) {
+            page = script_drop_js;
         } else if (url == "aqua://welcome/") {
             page = welcome;
         } else if (url == "aqua://library/history" || url == "aqua://library/bookmarks" ||
@@ -179,6 +220,7 @@ public:
         }
         const auto policy = url == "aqua://newtab/"
             ? "frame-ancestors 'none'"
+            : settings_page ? "default-src 'none'; script-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'"
             : "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'";
         CefResponse::HeaderMap headers{
             {"Cache-Control", "no-store"},
@@ -189,7 +231,7 @@ public:
         CefRefPtr<PageBytes> storage = new PageBytes(std::move(page));
         auto reader = new CefByteReadHandler(
             reinterpret_cast<const unsigned char*>(storage->text.data()), storage->text.size(), storage);
-        return new CefStreamResourceHandler(200, "OK", "text/html", headers,
+        return new CefStreamResourceHandler(200, "OK", drop_script ? "text/javascript" : "text/html", headers,
                                             CefStreamReader::CreateForHandler(reader));
     }
 private:

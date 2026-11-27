@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace aqua {
-class ExtensionManager final : public CefClient, public CefLifeSpanHandler, public CefRequestHandler {
+class ExtensionManager final : public CefClient, public CefLifeSpanHandler, public CefRequestHandler, public CefDragHandler {
 public:
     ExtensionManager(HWND owner, std::function<void(std::wstring)> open_web_tab,
                      std::function<void()> open_scripts);
@@ -17,6 +17,8 @@ public:
 
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+    CefRefPtr<CefDragHandler> GetDragHandler() override { return this; }
+    bool OnDragEnter(CefRefPtr<CefBrowser>, CefRefPtr<CefDragData>, DragOperationsMask) override;
     void OnAfterCreated(CefRefPtr<CefBrowser> browser) override;
     void OnBeforeClose(CefRefPtr<CefBrowser> browser) override;
     bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,

@@ -50,6 +50,8 @@ bool ReadMetadata(std::string_view source, Callback callback) {
     constexpr auto start = "// ==UserScript==";
     constexpr auto end = "// ==/UserScript==";
     if (source.starts_with("\xef\xbb\xbf")) source.remove_prefix(3);
+    const auto first = source.find_first_not_of(" \t\r\n");
+    if (first != std::string_view::npos) source.remove_prefix(first);
     const auto first_line = source.find('\n');
     if (Trim(source.substr(0, first_line)) != start) return source.find(start) == std::string_view::npos;
     if (first_line == std::string_view::npos) return false;
@@ -150,12 +152,18 @@ std::string WebOrigin(std::string_view url) {
     return origin;
 }
 
-bool IsSupportedScript(const std::string& source) {
-    return source.size() <= max_script && ValidEncoding(source) &&
-        ReadMetadata(source, [](std::string_view key, std::string_view value) {
-            if (key == "@require" || key == "@resource" || key == "@unwrap") return false;
-            if (key == "@grant") return value == "none";
-            if (key == "@run-at") return value == "document-end" || value == "document-idle";
+static ScriptImportError ValidateScript(const std::string& source) {
+    using Error = ScriptImportError;
+    if (source.size() > max_script) return Error::size;
+    if (!ValidEncoding(source)) return Error::encoding;
+    auto error = Error::metadata;
+    const auto valid = ReadMetadata(source, [&](std::string_view key, std::string_view value) {
+            if (key == "@require" || key == "@resource") { error = Error::dependencies; return false; }
+            if (key == "@unwrap" || (key == "@grant" && value != "none")) { error = Error::grants; return false; }
+            if (key == "@run-at" && value != "document-end" && value != "document-idle") {
+                error = Error::execution_time;
+                return false;
+            }
             if (key == "@include" || key == "@exclude")
                 return !value.empty() && value.size() <= 512 && !value.starts_with('/');
             if (key == "@match" || key == "@exclude-match") {
@@ -174,7 +182,30 @@ bool IsSupportedScript(const std::string& source) {
                     std::string_view::npos;
             }
             return true;
-        });
+    });
+    return valid ? Error::none : error;
+}
+
+bool IsSupportedScript(const std::string& source) {
+    return ValidateScript(source) == ScriptImportError::none;
+}
+
+bool IsJavaScriptFilename(std::wstring_view name) {
+    return name.size() > 3 && CompareStringOrdinal(name.data() + name.size() - 3, 3, L".js", 3, TRUE) == CSTR_EQUAL;
+}
+
+const wchar_t* ScriptImportErrorText(ScriptImportError error) {
+    switch (error) {
+    case ScriptImportError::capacity: return L"В библиотеке уже 16 скриптов. Удалите один перед импортом.";
+    case ScriptImportError::file: return L"Выберите существующий локальный файл .js или .user.js.";
+    case ScriptImportError::size: return L"Файл превышает лимит 512 КиБ.";
+    case ScriptImportError::encoding: return L"Файл пустой или сохранён в другой кодировке. Нужен JavaScript в UTF-8.";
+    case ScriptImportError::metadata: return L"Заголовок UserScript или шаблоны адресов имеют неподдерживаемый формат.";
+    case ScriptImportError::grants: return L"Скрипт запрашивает GM API или @unwrap. Aqua Scripts поддерживает @grant none.";
+    case ScriptImportError::dependencies: return L"Скрипту нужны внешние зависимости @require или @resource. Aqua Scripts их не загружает.";
+    case ScriptImportError::execution_time: return L"Скрипт запрашивает время запуска, которое Aqua Scripts не поддерживает. Доступны document-end и document-idle.";
+    default: return L"Не удалось подготовить скрипт к сохранению.";
+    }
 }
 
 bool RunsOn(const Script& script, std::string_view url) {
@@ -214,20 +245,37 @@ void ScriptLibrary::Load(const std::filesystem::path& profile) {
     }
 }
 
-bool ScriptLibrary::Add(const std::filesystem::path& path, std::string origin, Script& item) const {
-    if (items_.size() >= max_scripts || origin.empty() || origin != WebOrigin(origin) ||
-        !path.is_absolute() || GetDriveTypeW(path.root_path().c_str()) == DRIVE_REMOTE ||
-        CompareStringOrdinal(path.extension().c_str(), -1, L".js", -1, TRUE) != CSTR_EQUAL)
-        return false;
+ScriptImportError ScriptLibrary::PrepareFile(const std::filesystem::path& path, std::string origin, Script& item) const {
+    using Error = ScriptImportError;
+    const auto name = path.filename().wstring();
+    if (!path.is_absolute() || GetDriveTypeW(path.root_path().c_str()) == DRIVE_REMOTE ||
+        !IsJavaScriptFilename(name)) return Error::file;
+    std::error_code error;
+    const auto size = std::filesystem::file_size(path, error);
+    if (error) return Error::file;
+    if (size > max_script) return Error::size;
+    if (!size) return Error::encoding;
     auto source = ReadBounded(path, max_script);
-    if (!IsSupportedScript(source)) return false;
+    if (source.empty()) return Error::file;
+    return PrepareSource(name, std::move(source), std::move(origin), item);
+}
+
+ScriptImportError ScriptLibrary::PrepareSource(std::wstring_view name, std::string source,
+                                                std::string origin, Script& item) const {
+    using Error = ScriptImportError;
+    if (items_.size() >= max_scripts) return Error::capacity;
+    if (origin.empty() || origin != WebOrigin(origin)) return Error::storage;
+    if (name.size() > 255 || name.find_first_of(L"/\\:") != std::wstring_view::npos ||
+        !IsJavaScriptFilename(name)) return Error::file;
+    const auto validation = ValidateScript(source);
+    if (validation != Error::none) return validation;
     GUID guid{};
     wchar_t id[40]{};
     if (FAILED(CoCreateGuid(&guid)) || !StringFromGUID2(guid, id, static_cast<int>(std::size(id))))
-        return false;
-    item = {CefString(id).ToString().substr(1, 36), CefString(path.filename().wstring()).ToString(),
+        return Error::storage;
+    item = {CefString(id).ToString().substr(1, 36), CefString(std::wstring(name)).ToString(),
             std::move(origin), std::move(source), true};
-    return true;
+    return Error::none;
 }
 
 bool ScriptLibrary::Save(std::vector<Script> next) {

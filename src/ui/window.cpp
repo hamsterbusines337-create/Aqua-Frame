@@ -28,6 +28,7 @@ constexpr UINT upgrade_navigation = WM_APP + 4;
 constexpr UINT navigation_timing_ready = WM_APP + 5;
 constexpr UINT confirm_site_permission = WM_APP + 6;
 constexpr UINT download_action = WM_APP + 7;
+constexpr UINT process_script_drop = WM_APP + 8;
 constexpr UINT_PTR history_timer = 1;
 constexpr UINT_PTR warm_restore_timer = 2;
 constexpr size_t library_limit = 128;
@@ -318,6 +319,9 @@ LRESULT Window::Message(UINT msg, WPARAM w, LPARAM l) {
     }
     case process_script_action:
         RunScriptAction();
+        return 0;
+    case process_script_drop:
+        RunDroppedScript();
         return 0;
     case navigation_timing_ready:
         ShowNavigationTiming(static_cast<uint64_t>(w));
@@ -1185,6 +1189,7 @@ void Window::RunScriptAction() {
 }
 
 void Window::PickScriptFile() {
+    if (script_prompt_open_) return;
     if (last_web_origin_.empty()) {
         MessageBoxW(hwnd_, L"Сначала откройте сайт, которому хотите разрешить скрипт.",
                     L"Aqua Scripts", MB_OK | MB_ICONINFORMATION);
@@ -1198,11 +1203,17 @@ void Window::PickScriptFile() {
     chooser.lpstrFilter = L"JavaScript (*.js; *.user.js)\0*.js\0\0";
     chooser.lpstrFile = path.data();
     chooser.nMaxFile = static_cast<DWORD>(path.size());
-    chooser.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT;
-    if (GetOpenFileNameW(&chooser)) ImportScript(path.c_str());
+    chooser.Flags = OFN_EXPLORER | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_DONTADDTORECENT;
+    script_prompt_open_ = true;
+    const auto picked = GetOpenFileNameW(&chooser);
+    script_prompt_open_ = false;
+    if (picked) ImportScript(path.c_str());
+    else if (CommDlgExtendedError())
+        MessageBoxW(hwnd_, L"Не удалось открыть диалог выбора файла.", L"Aqua Scripts", MB_OK | MB_ICONERROR);
 }
 
 void Window::ImportScript(const std::filesystem::path& path) {
+    if (exiting_ || script_prompt_open_) return;
     if (const auto* tab = Find(selected_); tab && tab->private_tab) return;
     const auto origin = last_web_origin_;
     if (origin.empty()) {
@@ -1211,18 +1222,49 @@ void Window::ImportScript(const std::filesystem::path& path) {
         return;
     }
     Script item;
-    if (!scripts_.Add(path, origin, item)) {
-        MessageBoxW(hwnd_, L"Нужен файл .js или .user.js в UTF-8, до 512 КБ. "
-            L"Поддерживается до 16 скриптов, без GM API, @require и запуска document-start.",
-            L"Aqua Scripts", MB_OK | MB_ICONWARNING);
+    const auto error = scripts_.PrepareFile(path, origin, item);
+    ConfirmScriptImport(std::move(item), error);
+}
+
+void Window::QueueDroppedScript(uint64_t id, const CefString& name, const CefString& source) {
+    const auto* tab = Find(id);
+    if (exiting_ || dropped_script_ || script_prompt_open_ || !tab || id != selected_ ||
+        tab->private_tab || tab->closing || tab->url != L"aqua://settings/#scripts" ||
+        name.length() > 255 || source.length() > 512 * 1024) return;
+    dropped_script_.emplace(DroppedScript{id, name.ToWString(), source.ToString()});
+    if (!PostMessageW(hwnd_, process_script_drop, 0, 0)) dropped_script_.reset();
+}
+
+void Window::RunDroppedScript() {
+    auto request = std::exchange(dropped_script_, std::nullopt);
+    if (!request || exiting_ || script_prompt_open_) return;
+    const auto* tab = Find(request->tab);
+    if (!tab || tab->id != selected_ || tab->private_tab || tab->closing ||
+        tab->url != L"aqua://settings/#scripts") return;
+    if (last_web_origin_.empty()) {
+        MessageBoxW(hwnd_, L"Сначала откройте сайт, которому хотите разрешить скрипт.",
+                    L"Aqua Scripts", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+    Script item;
+    const auto error = scripts_.PrepareSource(request->name, std::move(request->source), last_web_origin_, item);
+    ConfirmScriptImport(std::move(item), error);
+}
+
+void Window::ConfirmScriptImport(Script item, ScriptImportError error) {
+    if (error != ScriptImportError::none) {
+        MessageBoxW(hwnd_, ScriptImportErrorText(error), L"Импорт Aqua Scripts", MB_OK | MB_ICONWARNING);
         return;
     }
     const auto message = L"Разрешить запуск скрипта «" + CefString(item.name).ToWString() +
-        L"» на сайте:\n\n" + CefString(origin).ToWString() +
+        L"» на сайте:\n\n" + CefString(item.origin).ToWString() +
         L"\n\nСкрипт сможет читать и изменять содержимое этого сайта, в том числе когда вы вошли в аккаунт. "
         L"Разрешайте запуск только доверенных файлов.";
-    if (MessageBoxW(hwnd_, message.c_str(), L"Разрешение Aqua Scripts",
-        MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING) != IDYES) return;
+    script_prompt_open_ = true;
+    const auto decision = MessageBoxW(hwnd_, message.c_str(), L"Разрешение Aqua Scripts",
+        MB_YESNO | MB_DEFBUTTON2 | MB_ICONWARNING);
+    script_prompt_open_ = false;
+    if (decision != IDYES || exiting_) return;
     auto next = scripts_.Items();
     next.push_back(std::move(item));
     if (!scripts_.Save(std::move(next))) {

@@ -16,6 +16,8 @@ class Client final : public CefClient, public CefDisplayHandler,
                      public CefLoadHandler, public CefDownloadHandler, public CefPermissionHandler {
 public:
     Client(Window& window, uint64_t tab, bool private_tab) : window_(window), tab_(tab), private_tab_(private_tab) {}
+    bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefProcessId,
+                                  CefRefPtr<CefProcessMessage>) override;
     CefRefPtr<CefDisplayHandler> GetDisplayHandler() override { return this; }
     CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
     #if CEF_API_ADDED(15800)

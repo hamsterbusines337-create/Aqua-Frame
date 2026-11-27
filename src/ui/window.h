@@ -20,6 +20,7 @@ public:
     bool ResetRequested() const { return reset_requested_; }
     void QueueSettingsAction(uint64_t tab, SettingsAction action);
     bool QueueScriptAction(uint64_t tab, std::string_view target);
+    void QueueDroppedScript(uint64_t tab, const CefString& name, const CefString& source);
     std::vector<Script> ScriptsFor(std::string_view url) const;
     void AddTab(const std::wstring& url = L"aqua://newtab/", bool private_tab = false, bool deferred = false);
     void RecordVisit(uint64_t tab, const CefString& url, int status);
@@ -74,6 +75,8 @@ private:
     void RunScriptAction();
     void PickScriptFile();
     void ImportScript(const std::filesystem::path& path);
+    void RunDroppedScript();
+    void ConfirmScriptImport(Script item, ScriptImportError error);
     void RefreshScriptSettings();
     void ApplySettingsAction(uint64_t tab, SettingsAction action);
     void SaveSession();
@@ -112,6 +115,13 @@ private:
         std::string script;
     };
     std::optional<PendingScriptAction> script_action_;
+    struct DroppedScript {
+        uint64_t tab;
+        std::wstring name;
+        std::string source;
+    };
+    std::optional<DroppedScript> dropped_script_;
+    bool script_prompt_open_ = false;
     std::string last_web_origin_;
     std::vector<Tab> tabs_;
     std::vector<std::wstring> closed_;
