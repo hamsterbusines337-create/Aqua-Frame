@@ -50,8 +50,9 @@ public static class DropFixture {
     [ClassInterface(ClassInterfaceType.None)]
     public sealed class TestDropSource : IDropSource {
         public volatile bool Drop;
+        public volatile bool Cancel;
         public int QueryContinueDrag(bool escape, uint keyState) {
-            return escape ? 0x00040101 : Drop ? 0x00040100 : 0;
+            return escape || Cancel ? 0x00040101 : Drop ? 0x00040100 : 0;
         }
         public int GiveFeedback(uint effect) { return 0x00040102; }
     }
@@ -64,6 +65,7 @@ public static class DropFixture {
     private static extern int DoDragDrop(System.Runtime.InteropServices.ComTypes.IDataObject data,
         IDropSource source, uint allowed, out uint effect);
 
+    [DllImport("user32.dll")] private static extern void keybd_event(byte key, byte scan, uint flags, UIntPtr extra);
     [DllImport("kernel32.dll")] private static extern void Sleep(uint milliseconds);
 
     [DllImport("shell32.dll", CharSet=CharSet.Unicode)]
@@ -84,6 +86,12 @@ public static class DropFixture {
             var iid = typeof(System.Runtime.InteropServices.ComTypes.IDataObject).GUID;
             Marshal.ThrowExceptionForHR(SHCreateDataObject(IntPtr.Zero, 1, new[] { item }, IntPtr.Zero, ref iid, out data));
             SetCursorPos(x - 80, y - 80);
+            mouse_event(2, 0, 0, 0, UIntPtr.Zero);
+            using (var timeout = new System.Threading.Timer(_ => {
+                source.Cancel = true;
+                keybd_event(27, 0, 0, UIntPtr.Zero);
+                keybd_event(27, 0, 2, UIntPtr.Zero);
+            }, null, 5000, System.Threading.Timeout.Infinite))
             using (var motion = new System.Threading.Timer(_ => {
                 SetCursorPos(x, y);
                 Sleep(800);
@@ -96,6 +104,7 @@ public static class DropFixture {
                 return "HRESULT=0x" + status.ToString("X") + " effect=" + effect;
             }
         } finally {
+            mouse_event(4, 0, 0, 0, UIntPtr.Zero);
             if (data != null) Marshal.ReleaseComObject(data);
             if (item != IntPtr.Zero) Marshal.FreeCoTaskMem(item);
             OleUninitialize();

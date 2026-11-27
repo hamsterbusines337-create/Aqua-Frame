@@ -168,7 +168,12 @@ try {
     $point.X = 489
     $point.Y = 300
     if (![AquaScriptUi]::ClientToScreen($window, [ref]$point)) { throw 'Unable to locate the script drop zone.' }
+    Write-Host 'Picker import is visible. Starting native file drag.'
     Write-Host ([DropFixture]::Drag($plain, $point.X, $point.Y))
+    if ((Window-For '#32770' 'Разрешение Aqua Scripts' 4) -eq $zero) {
+        Screenshot $window 'scripts-drop-error.png'
+        throw 'The file drop did not open a confirmation.'
+    }
     Confirm-Script 'drop'
     if ((Copy-VisibleScripts $window) -notmatch 'aqua-plain-fixture.js') {
         throw 'The dropped file is missing from the rendered script list.'
