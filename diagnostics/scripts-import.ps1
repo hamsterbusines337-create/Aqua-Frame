@@ -1,5 +1,6 @@
 $ErrorActionPreference = 'Stop'
 if ($env:GITHUB_ACTIONS -ne 'true') { throw 'This test needs a disposable GitHub Actions runner.' }
+. (Join-Path $PSScriptRoot 'extension-drop.ps1') -HelpersOnly
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
 Add-Type @'
 using System;
@@ -101,9 +102,22 @@ function Import-Script([IntPtr]$window, [string]$path, [string]$label) {
     [void][AquaScriptUi]::SetForegroundWindow($dialog)
     Start-Sleep -Milliseconds 300
     [Windows.Forms.SendKeys]::SendWait($path + '{ENTER}')
+    Confirm-Script $label
+}
+
+function Copy-VisibleScripts([IntPtr]$window) {
+    [Windows.Forms.Clipboard]::Clear()
+    [void][AquaScriptUi]::SetForegroundWindow($window)
+    Click-At $window 915 116
+    [Windows.Forms.SendKeys]::SendWait('^a')
+    [Windows.Forms.SendKeys]::SendWait('^c')
+    Start-Sleep -Milliseconds 450
+    return [Windows.Forms.Clipboard]::GetText()
+}
+
+function Confirm-Script([string]$label) {
     $confirm = Window-For '#32770' 'Разрешение Aqua Scripts' 12
     if ($confirm -eq $zero) {
-        Screenshot $dialog "scripts-picker-error-$label.png"
         throw "Aqua Scripts did not ask for site permission for $label."
     }
     Screenshot $confirm "scripts-permission-$label.png"
@@ -146,7 +160,21 @@ try {
     Open-Address $window 'aqua://settings/#scripts'
     Screenshot $window 'scripts-before.png'
     Import-Script $window $script 'userscript'
-    Import-Script $window $plain 'plain'
+    if ((Copy-VisibleScripts $window) -notmatch 'aqua-scope-fixture.user.js') {
+        throw 'The confirmed file is missing from the rendered script list.'
+    }
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $point = New-Object AquaScriptUi+Point
+    $point.X = 489
+    $point.Y = 300
+    if (![AquaScriptUi]::ClientToScreen($window, [ref]$point)) { throw 'Unable to locate the script drop zone.' }
+    Write-Host ([DropFixture]::Drag($plain, $point.X, $point.Y))
+    Confirm-Script 'drop'
+    if ((Copy-VisibleScripts $window) -notmatch 'aqua-plain-fixture.js') {
+        throw 'The dropped file is missing from the rendered script list.'
+    }
+    if ((Get-Address $window) -ne 'aqua://settings/#scripts') { throw 'The drop navigated away from Aqua Scripts.' }
+    [Windows.Forms.SendKeys]::SendWait('{ESC}')
     $entries = @(Get-Content $library -Raw | ConvertFrom-Json)
     if ($entries.Count -ne 2) { throw 'Both scripts must be saved.' }
     foreach ($entry in $entries) {

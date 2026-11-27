@@ -19,15 +19,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh run watch 45891171135 --repo "${{ github.repository }}" --interval 12 --exit-status
+          gh run watch 46026424249 --repo "${{ github.repository }}" --interval 12 --exit-status
           if ($LASTEXITCODE -ne 0) { throw 'The Windows build failed.' }
-          gh run download 45891171135 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
+          gh run download 46026424249 --repo "${{ github.repository }}" --name AquaFrame-Runtime-x64 --dir runtime
           if ($LASTEXITCODE -ne 0) { throw 'Could not download runtime.' }
           icacls runtime /grant '*S-1-15-2-2:(OI)(CI)(RX)'
           if ($LASTEXITCODE -ne 0) { throw 'Could not set sandbox ACLs.' }
-      - name: Verify file picker, origin consent and isolated execution
+      - name: Verify picker, actual Windows file drop, visible list and isolated execution
         shell: pwsh
-        run: ./diagnostics/scripts-import.ps1
+        run: pwsh -STA -NoProfile -File ./diagnostics/scripts-import.ps1
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:

@@ -1,3 +1,4 @@
+param([switch]$HelpersOnly)
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Windows.Forms, System.Drawing, UIAutomationClient, UIAutomationTypes
 Add-Type -ReferencedAssemblies System.Windows.Forms,System.Drawing @'
@@ -90,6 +91,7 @@ public static class DropFixture {
 }
 '@
 [void][DropFixture]::SetProcessDPIAware()
+if ($HelpersOnly) { return }
 $profile = Join-Path $env:LOCALAPPDATA 'Aqua Frame/User Data'
 if (Test-Path $profile) { throw 'The drag fixture expects a fresh, disposable runner profile.' }
 $fixture = Join-Path $env:RUNNER_TEMP 'aqua-extension-fixture'
